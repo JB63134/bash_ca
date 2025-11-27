@@ -420,35 +420,79 @@ fi
     # -------------------------------------------------------------------------
     # External commands
     # -------------------------------------------------------------------------
-    if [[ "$ctype" == "file" ]]; then 
-        cmd_path=$(command -v "$cmd") || { 
+    if [[ "$ctype" == "file" ]]; then
+        cmd_path=$(command -v "$cmd") || {
             printf "%s${RED}Command not found: '%s'${RESET}\n" "$indent" "$cmd"
             return 1
         }
-        local cmd_real formatted_type             
+
+        local cmd_real formatted_type file_info
         cmd_real=$(readlink -f "$cmd_path" 2>/dev/null || echo "$cmd_path")
         file_info=$(file -b "$cmd_real")
 
-        # Replace commas with newlines for clarity, but keep first line aligned
-        formatted_type=$(printf "%s" "$file_info" | sed -E $'s/, interpreter/\\\ninterpreter/g; s/, version/\\\nversion/g; s/, dynamically/\\\ndynamically/g; s/, BuildID/\\\nBuildID/g; s/, for /\\\nfor /g')
-        
+        formatted_type=$(printf "%s" "$file_info" | sed -E \
+            $'s/, interpreter/\\\ninterpreter/g; 
+              s/, version/\\\nversion/g; 
+              s/, dynamically/\\\ndynamically/g; 
+              s/, BuildID/\\\nBuildID/g; 
+              s/, for /\\\nfor /g')
+
         printf "%s├─ ${CYAN}'%s' ${RESET}is an external command\n" "$indent" "$cmd"
-        printf "%s    ↳ Path: ${CYAN}%s${RESET}\n" "$indent" "$cmd_path"    
-  
-        if [[ "$cmd_real" != "$cmd_path" ]]; then # && \
+        printf "%s    ↳ Path: ${CYAN}%s${RESET}\n" "$indent" "$cmd_path"
+
+        # Detect symbolic link
+        if [[ "$cmd_real" != "$cmd_path" ]]; then
             printf "%s    ↳ ${YELLOW}Symbolic link ${RESET}to: ${YELLOW}%s${RESET}\n" "$indent" "$cmd_real"
             cmd_path="$cmd_real"
             printf "%s    ↳ Now Examining: ${BPURP}%s${RESET}\n" "$indent" "$cmd_real"
         fi
- 
-        # Root privilege detection 
+
+        # Executable Type
+        if grep -qiE 'script|text executable' <<< "$file_info"; then
+            printf "%s    ↳ Executable Type: ${CYAN}Script / Text executable${RESET}\n" "$indent"
+            local first_line interp
+            first_line=$(head -n1 "$cmd_path")
+
+            if [[ "$first_line" =~ ^#! ]]; then
+                interp="${first_line#\#!}"
+                interp="${interp#"${interp%%[![:space:]]*}"}"
+            fi
+
+            while IFS= read -r line; do
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
+            done <<< "$formatted_type"
+
+            printf "%s    ↳ Interpreter: ${CYAN}%s${RESET}\n" "$indent" "$interp"
+
+        elif grep -qi 'ELF' <<< "$file_info"; then
+            if grep -qi 'statically linked' <<< "$file_info"; then
+                printf "%s    ↳ Executable Type: ELF binary - Statically linked\n" "$indent"
+            else
+                printf "%s    ↳ Executable Type: ELF binary - Dynamically linked\n" "$indent"
+            fi
+
+            while IFS= read -r line; do
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
+            done <<< "$formatted_type"
+
+        else
+            printf "%s    ↳ Executable Type: Unknown\n" "$indent"
+            while IFS= read -r line; do
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
+            done <<< "$formatted_type"
+            printf "%s    ⎟       ${YELLOW}%s${RESET}\n" "$indent" "$file_info"
+        fi
+
+        # Root privilege detection
         local requires_root=0
         local root_reason=""
-        # 1. Check for setuid root
-        if [[ -u "$cmd_path" && $(stat -c '%U' "$cmd_path" 2>/dev/null) == "root" ]]; then
+
+        # 1. setuid root
+        if [[ -u "$cmd_path" && $(stat -c '%U' "$cmd_path") == "root" ]]; then
             requires_root=1
             root_reason="setuid root binary"
-        # 2. Check capabilities with getcap
+
+        # 2. capabilities from getcap
         elif command -v getcap &>/dev/null; then
             local caps
             caps=$(getcap "$cmd_path" 2>/dev/null)
@@ -457,21 +501,16 @@ fi
                 root_reason="binary grants elevated capabilities (getcap)"
             fi
         fi
-        # 3. Check capabilities using capsh if available
-        if (( !requires_root )) && command -v capsh &>/dev/null; then(
-            local cap_info
-            cap_info=$(capsh --print 2>/dev/null)
-    
-            if [[ "$cap_info" =~ "Current:" ]]; then
-                if [[ "$cap_info" =~ (cap_sys_admin|cap_dac_override|cap_net_admin) ]]; then
-                    requires_root=1
-                    root_reason="binary requires elevated capabilities (capsh)"
-                fi
-            fi)
-        fi
-        # 4. Known admin commands
+
+        # 3. known admin commands
         if (( !requires_root )); then
-            local root_cmds=(mount umount reboot shutdown halt ifconfig iptables ip systemctl journalctl modprobe insmod rmmod fdisk mkfs losetup parted fsck useradd userdel passwd chown chmod service sysctl visudo fstrim swapoff swapon update-grub grub-install blkid update-initramfs)
+            local root_cmds=(
+                mount umount reboot shutdown halt ifconfig iptables ip
+                systemctl journalctl modprobe insmod rmmod fdisk mkfs losetup
+                parted fsck useradd userdel passwd chown chmod service sysctl
+                visudo fstrim swapoff swapon update-grub grub-install blkid
+                update-initramfs
+            )
             for rcmd in "${root_cmds[@]}"; do
                 if [[ "$cmd" == "$rcmd" ]]; then
                     requires_root=1
@@ -480,53 +519,17 @@ fi
                 fi
             done
         fi
-        # 5. Display result
+        
         if (( requires_root )); then
-            printf "%s    ↳ Requires root privileges: ${YELLOW}Yes (%s)${RESET}\n" "$indent" "$root_reason"
-        else
-            printf "%s    ↳ Requires root privileges: ${CYAN}No${RESET}\n" "$indent"
+            printf "%s    ↳ Requires root privileges: ${YELLOW}%s${RESET}\n" "$indent" "$root_reason"
+            # printf "%s    ↳ Requires root privileges: ${CYAN}No${RESET}\n" "$indent"
         fi
- 
-        # Detect Executable Type
-        if grep -qi 'ELF' <<< "$file_info"; then
-            if grep -qi 'statically linked' <<< "$file_info"; then
-                printf "%s    ↳ Executable Type: ELF binary - Statically linked\n" "$indent"
-                while IFS= read -r line; do
-                    printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
-                done <<< "$formatted_type"
-            else
-                printf "%s    ↳ Executable Type: ELF binary - Dynamically linked\n" "$indent"  
-                while IFS= read -r line; do
-                    printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
-                done <<< "$formatted_type"  
-            fi
 
-        elif grep -qi 'script\|text executable' <<< "$file_info"; then
-            printf "%s    ↳ Executable Type: ${CYAN}Script / Text executable${RESET}\n" "$indent"
-
-            local first_line interp
-            first_line=$(head -n1 "$cmd_path")
-
-            if [[ "$first_line" =~ ^#! ]]; then
-                interp="${first_line#\#!}"        # remove shebang (#!)
-                interp="${interp#"${interp%%[![:space:]]*}"}"  # trim leading whitespace
-                while IFS= read -r line; do
-                    printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
-                done <<< "$formatted_type"       
-            fi
-            printf "%s    ↳ Interpreter: ${CYAN}%s${RESET}\n" "$indent" "$interp"
-        else
-            printf "%s    ↳ Executable Type: Unknown\n" "$indent"
-            while IFS= read -r line; do
-                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
-            done <<< "$formatted_type"
-            printf "%s    ⎟       ${YELLOW}%s${RESET}\n" "$indent" "$file_info"
-        fi
-   
-        # Get dependencies
+        # Dependencies (ELF only)
+        local deps
         deps=$(ldd "$cmd_path" 2>/dev/null | sed 's/^[[:space:]]*//')
         if [[ -n "$deps" ]]; then
-            printf "%s    ↳ Dependencies:\n" "$indent" 
+            printf "%s    ↳ Dependencies:\n" "$indent"
             local unmet_found=0
             while IFS= read -r line; do
                 if [[ "$line" =~ "not found" ]]; then
@@ -536,23 +539,19 @@ fi
                     printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
                 fi
             done <<< "$deps"
-            (( unmet_found )) && printf "%s        ↳ ${RED}⚠ Some dependencies are missing!${RESET}\n" "$indent"
+            (( unmet_found )) && printf "%s        ↳ ${RED}Some dependencies are missing!${RESET}\n" "$indent"
         fi
 
-        # Package info---------------
-        local pkg_name
-        local pkg_lines=()
-
+        # Package info
         if command -v dpkg &>/dev/null; then
+            local pkg_name pkg_lines=()
             pkg_name=$(dpkg -S "$cmd_path" 2>/dev/null | cut -d: -f1 | head -n1)
 
             if [[ -n "$pkg_name" ]]; then
-                # Read dpkg show output line by line
-                while IFS= read -r line; do
-                    pkg_lines+=("$line")
-                done < <(dpkg-query -W -f='${Package}\n${Version}\n${Maintainer}\n${Description}\n' "$pkg_name" 2>/dev/null)
-                
-                # Display each line with custom formatting
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                    < <(dpkg-query -W -f='${Package}\n${Version}\n${Maintainer}\n${Description}\n' \
+                    "$pkg_name" 2>/dev/null)
+
                 printf "%s    ↳ Package Info:\n" "$indent"
                 printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[0]}"
                 printf "%s    ⎟    Version: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[1]}"
@@ -561,27 +560,28 @@ fi
             fi
         fi
 
-        # Get and display file permissions
+        # Permissions
         if [[ -x "$cmd_path" ]]; then
             local perms octal owner_grp owner_perm group_perm other_perm
-            # Using stat for symbolic and octal
-            if stat --version &>/dev/null; then
-                perms=$(stat -c "%A" "$cmd_path")      # symbolic: -rwxr-xr-x
-                octal=$(stat -c "%a" "$cmd_path")      # numeric: 755
-                owner_grp=$(stat -c "%U:%G" "$cmd_path") # owner:group
-                owner_perm=$(stat -c "%A" "$cmd_path" | cut -c2-4)   # owner bits
-                group_perm=$(stat -c "%A" "$cmd_path" | cut -c5-7)   # group bits
-                other_perm=$(stat -c "%A" "$cmd_path" | cut -c8-10)  # others bits
-            fi
+            perms=$(stat -c "%A" "$cmd_path")
+            octal=$(stat -c "%a" "$cmd_path")
+            owner_grp=$(stat -c "%U:%G" "$cmd_path")
+            owner_perm="${perms:1:3}"
+            group_perm="${perms:4:3}"
+            other_perm="${perms:7:3}"
 
             printf "%s    ↳ Permissions: ${CYAN}%s${RESET} (octal: ${CYAN}%s${RESET})\n" "$indent" "$perms" "$octal"
-            printf "%s         ↳ Owner/Group: ${CYAN}%s${RESET}\n" "$indent" "$owner_grp"
-            printf "%s         ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" \
-            "$indent" "$owner_perm" "$group_perm" "$other_perm"
-            fi
-   
-        # Show script contents if text executable
-        if [[ "$file_info" == *"script"* || "$file_info" == *"text executable"* ]]; then
+            if grep -qiE 'script|text executable' <<< "$file_info"; then
+                printf "%s    ⎟    ↳ Owner/Group: ${CYAN}%s${RESET}\n" "$indent" "$owner_grp"
+                printf "%s    ⎟    ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" "$indent" "$owner_perm" "$group_perm" "$other_perm"
+            else
+                printf "%s         ↳ Owner/Group: ${CYAN}%s${RESET}\n" "$indent" "$owner_grp"
+                printf "%s         ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" "$indent" "$owner_perm" "$group_perm" "$other_perm"
+           fi
+        fi
+    
+        # Dump script content
+        if grep -qiE 'script|text executable' <<< "$file_info"; then
             printf "%s    ↳ Showing script ${CYAN}'%s'${RESET}:\n\n" "$indent" "$cmd"
             if [[ -r "$cmd_path" ]]; then
                 _ca_highlight_script "$cmd_path" "$indent"
@@ -589,7 +589,7 @@ fi
             fi
             return 0
         fi
-
+        
         local next_cmd=("${fcmd[@]:1}")
         if (( ${#next_cmd[@]} > 0 )); then
             ca "${next_cmd[*]}" $((depth + 1))
@@ -1144,19 +1144,6 @@ _ca_sourced_files() {
 #------------------------------------------------------------------------
 # Function: _ca_highlight_script   # _ca_highlight_script "$path-to-script" "<blankspaces>"
 # Purpose: Modular syntax highlighting with indentation based on string in $2
-#
-#        how to add patterns and colors for highlighting
-#
-#  Example usage: To highlight the word forecast in bright magenta:
-#  HIGHLIGHT_PATTERNS+=('\bforecast\b') # your_regex_here
-#  HIGHLIGHT_COLORS+=('\x1b[95m')   # bright magenta - choose the ANSI color
-#
-#  Make sure that HIGHLIGHT_PATTERNS and HIGHLIGHT_COLORS remain aligned by index 
-#  (pattern i uses color i).
-#
-#  Multiple new entries: 
-#  HIGHLIGHT_PATTERNS+=('\bforecast\b' '\bradar\b') # Highlight 'forecast' and 'radar'
-#  HIGHLIGHT_COLORS+=('\x1b[95m' '\x1b[92m')  # bright magenta & bright green
 #------------------------------------------------------------------------
 _ca_highlight_script() {
     local input="$1"
