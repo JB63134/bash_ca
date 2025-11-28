@@ -1,5 +1,8 @@
+V1.0.7
+     Enhanced <TAB> completion, and PATH detection.
+     Code cleanup.
+
 V1.0.5 switched to using perl for highlighting instead of sed.  
        fixed some exe detection code.
-
 
 V1.0.0 Split from h first independent version
