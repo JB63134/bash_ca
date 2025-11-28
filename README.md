@@ -1,5 +1,8 @@
 # ca — A Buggy (But Ambitious) Bash Command Analyzer
 
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.0.5-blue)](https://github.com/yourusername/ca-bash-helper/releases)
+
 ca is very BASH specific, and Debian specific. Should work on Debian based distributions like Ubuntu, and Linux Mint. 
   
 The command resolution engine from my h function became the basis for ca.  
