@@ -522,7 +522,6 @@ fi
         
         if (( requires_root )); then
             printf "%s    ↳ Requires root privileges: ${YELLOW}%s${RESET}\n" "$indent" "$root_reason"
-            # printf "%s    ↳ Requires root privileges: ${CYAN}No${RESET}\n" "$indent"
         fi
 
         # Dependencies (ELF only)
