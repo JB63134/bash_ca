@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #------------------------------------------------------------------------
-# .bash_ca
-# Main Function: ca
+# ca  aka .bash_ca                                             ┌──────┐
+# Main Function: ca                                    │      │ 
+#                                                      └──────┘
 # Purpose: Analyzes a Bash command, alias, builtin, keyword, function, or binary
 #------------------------------------------------------------------------
 # If not running interactively, don't do anything
@@ -16,8 +17,8 @@ declare -gA __H_SEEN_ALIASES
 declare -gA __H_SEEN_COMMANDS
 declare -gA __H_SEEN_BUILTINS
 declare -gA __H_SHADOW_SEEN
-declare -gA __H_VISITED        # NEW: global visited set for recursion protection
-declare -g suppress_builtin_msg=1   # suppress repeated builtin help
+declare -gA __H_VISITED        
+declare -g suppress_builtin_msg=1    
 complete -F _ca_completion ca
 
 ca() {
@@ -37,7 +38,7 @@ ca() {
     if (( depth == 0 )); then
         trap 'PATH="$OLD_PATH"' RETURN
 
-        local admin_dirs=(
+    local admin_dirs=(
             "$HOME/.local/bin"
             "$HOME/bin/scripts"
             "$HOME/bin"
@@ -49,14 +50,28 @@ ca() {
             "/usr/games"
             "/bin"
             "/sbin"   
+            "$HOME/.cargo/bin"
+            "$HOME/.npm-global/bin"
+            "$HOME/.local/share/bash-completion/bin"
+            "$BASH_ENV"
+            "/opt/bin"
+            "/opt/sbin"
+            "/snap/bin"
+            "/flatpak/bin"
+            "$CONDA_PREFIX/bin"
             )
+            
+    # Add admin dirs to PATH if missing
+    for dir in "${admin_dirs[@]}"; do
+        if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
+            PATH="$PATH:$dir"
+        fi
+    done
     
-        # Add admin dirs to PATH if missing
-        for dir in "${admin_dirs[@]}"; do
-            if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
-                PATH="$PATH:$dir"
-            fi
-        done
+    while IFS= read -r d; do
+        [[ -d "$d" && ":$PATH:" != *":$d:"* ]] && PATH="$PATH:$d"
+    done < <(find $HOME/.local/bin -type d 2>/dev/null)
+    
         export PATH
    
         # -------------------------
@@ -243,76 +258,69 @@ ca() {
         fi
     fi
 
-# -------------------------------------------------------------------------
-# Builtins
-# -------------------------------------------------------------------------
-if [[ "$ctype" == "builtin" ]]; then
+    # -------------------------------------------------------------------------
+    # Builtins
+    # -------------------------------------------------------------------------
+    if [[ "$ctype" == "builtin" ]]; then
     
-    # Special builtins: `builtin` and `command`
-    if [[ "$cmd" == "builtin" || "$cmd" == "command" ]]; then    
+        # Special builtins: `builtin` and `command`
+        if [[ "$cmd" == "builtin" || "$cmd" == "command" ]]; then    
         
-        # Case: user typed plain `builtin` or `command`
-        if (( ${#fcmd[@]} == 1 )); then
-            printf "%s├─ Detected builtin ${CYAN}'%s' ${RESET}with no command\n" \
-                "$indent" "$cmd"
-            printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" \
-                "$indent" "$cmd"
-            help "$cmd" 2>/dev/null | sed 's/^/    /'
-            return 0
+            # Case: user typed plain `builtin` or `command`
+            if (( ${#fcmd[@]} == 1 )); then
+                printf "%s├─ Detected builtin ${CYAN}'%s' ${RESET}with no command\n" "$indent" "$cmd"
+                printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
+                help "$cmd" 2>/dev/null | sed 's/^/    /'
+                return 0
+            fi
+
+            # Strip wrapper and skip flags
+            local subcmd=("${fcmd[@]:1}")
+            while [[ "${subcmd[0]}" == -* ]]; do
+                subcmd=("${subcmd[@]:1}")
+            done
+
+            printf "%s├─ Detected ${CYAN}'%s'${RESET} wrapper\n" "$indent" "$cmd"
+            printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$indent" "${subcmd[0]}"
+            help "${subcmd[0]}" 2>/dev/null | sed 's/^/    /'
+            return 0    
         fi
-
-        # Strip wrapper and skip flags
-        local subcmd=("${fcmd[@]:1}")
-        while [[ "${subcmd[0]}" == -* ]]; do
-            subcmd=("${subcmd[@]:1}")
-        done
-
-        printf "%s├─ Detected ${CYAN}'%s'${RESET} wrapper\n" "$indent" "$cmd"
-        printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" \
-            "$indent" "${subcmd[0]}"
-
-        help "${subcmd[0]}" 2>/dev/null | sed 's/^/    /'
-        return 0    
-    fi
     
-    # Normal builtin
-    printf "%s├─ ${CYAN}'%s'${RESET} is a shell builtin\n" "$indent" "$cmd"
+        # Normal builtin
+        printf "%s├─ ${CYAN}'%s'${RESET} is a shell builtin\n" "$indent" "$cmd"
 
-    # Enabled/disabled
-    local enabled_state="enabled"
-    if enable -p 2>/dev/null | grep -qE "^-n ${cmd}\b"; then
-        enabled_state="disabled"
-    fi
-    printf "%s    ↳ Status: Shell builtin is ${CYAN}%s${RESET}\n" \
-        "$indent" "$enabled_state"
-
-    # Loadable builtins
-    local origin="Core Bash builtin"
-    while read -r loaded; do
-        # format: enable -f PATH NAME
-        builtin_name="${loaded##* }"
-        if [[ "$builtin_name" == "$cmd" ]]; then
-            origin="Loadable builtin ($loaded)"
-            break
+        # Enabled/disabled
+        local enabled_state="enabled"
+        if enable -p 2>/dev/null | grep -qE "^-n ${cmd}\b"; then
+            enabled_state="disabled"
         fi
-    done < <(enable -a | grep '^enable -f ' || true)
+        printf "%s    ↳ Status: Shell builtin is ${CYAN}%s${RESET}\n" "$indent" "$enabled_state"
 
-    printf "%s    ↳ Source:  ${CYAN}%s${RESET}\n" "$indent" "$origin"
+        # Loadable builtins
+        local origin="Core Bash builtin"
+        while read -r loaded; do
+            # format: enable -f PATH NAME
+            builtin_name="${loaded##* }"
+            if [[ "$builtin_name" == "$cmd" ]]; then
+                origin="Loadable builtin ($loaded)"
+                break
+            fi
+        done < <(enable -a | grep '^enable -f ' || true)
 
+        printf "%s    ↳ Source:  ${CYAN}%s${RESET}\n" "$indent" "$origin"
 
-    # Show help
-    printf "%s    ↳ Showing ${CYAN}'help %s'${RESET}:\n\n" \
-        "$indent" "$cmd"
-    help "$cmd" 2>/dev/null | sed "s/^/$indent        /"
+        # Show help
+        printf "%s    ↳ Showing ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
+        help "$cmd" 2>/dev/null | sed "s/^/$indent        /"
 
-    # Recurse
-    local nextcmd=("${fcmd[@]:1}")
-    if (( ${#nextcmd[@]} > 0 )); then
-        ca "${nextcmd[*]}" $((depth + 1))
+        # Recurse
+        local nextcmd=("${fcmd[@]:1}")
+        if (( ${#nextcmd[@]} > 0 )); then
+            ca "${nextcmd[*]}" $((depth + 1))
+        fi
+
+        return 0
     fi
-
-    return 0
-fi
         
     # -------------------------------------------------------------------------
     # Functions
@@ -363,7 +371,7 @@ fi
         
         _ca_sourcedtree
         
-        #----------------------------
+        #-----------------------------------------------------
         # Enable nullglob temporarily 
         local nullglob_was=0
         shopt -q nullglob && nullglob_was=1 || shopt -s nullglob      
@@ -375,8 +383,8 @@ fi
                 printf "%s    ↳ Defined in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$file" "$line_number"
              fi
         done
-        (( !nullglob_was )) && shopt -u nullglob           # Restore nullglob state if we enabled it
-        #----------------------------
+        (( !nullglob_was )) && shopt -u nullglob  # Restore nullglob state if we enabled it
+        #-----------------------------------------------------
         
         if [[ -z "$found_location" ]]; then
             printf "%s    ↳ Defined manually in shell, or a custom location.\n" "$indent"
@@ -548,8 +556,7 @@ fi
 
             if [[ -n "$pkg_name" ]]; then
                 while IFS= read -r line; do pkg_lines+=("$line"); done \
-                    < <(dpkg-query -W -f='${Package}\n${Version}\n${Maintainer}\n${Description}\n' \
-                    "$pkg_name" 2>/dev/null)
+                    < <(dpkg-query -W -f='${Package}\n${Version}\n${Maintainer}\n${Description}\n'  "$pkg_name" 2>/dev/null)
 
                 printf "%s    ↳ Package Info:\n" "$indent"
                 printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[0]}"
@@ -570,13 +577,8 @@ fi
             other_perm="${perms:7:3}"
 
             printf "%s    ↳ Permissions: ${CYAN}%s${RESET} (octal: ${CYAN}%s${RESET})\n" "$indent" "$perms" "$octal"
-            if grep -qiE 'script|text executable' <<< "$file_info"; then
                 printf "%s    ⎟    ↳ Owner/Group: ${CYAN}%s${RESET}\n" "$indent" "$owner_grp"
                 printf "%s    ⎟    ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" "$indent" "$owner_perm" "$group_perm" "$other_perm"
-            else
-                printf "%s         ↳ Owner/Group: ${CYAN}%s${RESET}\n" "$indent" "$owner_grp"
-                printf "%s         ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" "$indent" "$owner_perm" "$group_perm" "$other_perm"
-           fi
         fi
     
         # Dump script content
@@ -587,8 +589,9 @@ fi
                 printf "\n\n%s    ─── End of script '%s' ───\n" "$indent" "$cmd"
             fi
             return 0
+        else
+            printf "%s    └──────────────────────────────────────────\n\n" "$indent"
         fi
-        
         local next_cmd=("${fcmd[@]:1}")
         if (( ${#next_cmd[@]} > 0 )); then
             ca "${next_cmd[*]}" $((depth + 1))
@@ -639,7 +642,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     h v1.0.5 — Bash Command Analyzer
+     ca v1.0.7 — Bash Command Analyzer
      Author : John Blair
      Updated: 2025-11-10  
           
@@ -1015,9 +1018,44 @@ _ca_completion() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
     local commands
 
+    local admin_dirs=(
+            "$HOME/.local/bin"
+            "$HOME/bin/scripts"
+            "$HOME/bin"
+            "/usr/local/bin"
+            "/usr/local/sbin"
+            "/usr/local/games"
+            "/usr/bin"
+            "/usr/sbin"        
+            "/usr/games"
+            "/bin"
+            "/sbin"   
+            "$HOME/.cargo/bin"
+            "$HOME/.npm-global/bin"
+            "$HOME/.local/share/bash-completion/bin"
+            "$BASH_ENV"
+            "/opt/bin"
+            "/opt/sbin"
+            "/snap/bin"
+            "/flatpak/bin"
+            "$CONDA_PREFIX/bin"
+            )
+            
+    # Add admin dirs to PATH if missing
+    for dir in "${admin_dirs[@]}"; do
+        if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
+            PATH="$PATH:$dir"
+        fi
+    done
+    
+    while IFS= read -r d; do
+        [[ -d "$d" && ":$PATH:" != *":$d:"* ]] && PATH="$PATH:$d"
+    done < <(find $HOME/.local/bin -type d 2>/dev/null)
+    
     # Collect possible completions: aliases, functions, builtins, and executables in PATH
     commands=$(compgen -A function -A alias -A builtin -A command -- "$cur")
-
+    
+    PATH="$OLD_PATH" 
     # Return completions
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
 }
