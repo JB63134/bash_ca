@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #------------------------------------------------------------------------
-# ca  aka .bash_ca                                             ┌──────┐
+# ca  aka .bash_ca                                     ┌──────┐
 # Main Function: ca                                    │      │ 
 #                                                      └──────┘
 # Purpose: Analyzes a Bash command, alias, builtin, keyword, function, or binary
@@ -13,11 +13,11 @@ esac
 
 OLD_PATH="$PATH"
 
-declare -gA __H_SEEN_ALIASES
-declare -gA __H_SEEN_COMMANDS
-declare -gA __H_SEEN_BUILTINS
-declare -gA __H_SHADOW_SEEN
-declare -gA __H_VISITED        
+declare -gA __CA_SEEN_ALIASES
+declare -gA __CA_SEEN_COMMANDS
+declare -gA __CA_SEEN_BUILTINS
+declare -gA __CA_SHADOW_SEEN
+declare -gA __CA_VISITED        
 declare -g suppress_builtin_msg=1    
 complete -F _ca_completion ca
 
@@ -36,43 +36,8 @@ ca() {
     # set new path, clean arrays, and greet user once
     # -------------------------
     if (( depth == 0 )); then
-        trap 'PATH="$OLD_PATH"' RETURN
-
-    local admin_dirs=(
-            "$HOME/.local/bin"
-            "$HOME/bin/scripts"
-            "$HOME/bin"
-            "/usr/local/bin"
-            "/usr/local/sbin"
-            "/usr/local/games"
-            "/usr/bin"
-            "/usr/sbin"        
-            "/usr/games"
-            "/bin"
-            "/sbin"   
-            "$HOME/.cargo/bin"
-            "$HOME/.npm-global/bin"
-            "$HOME/.local/share/bash-completion/bin"
-            "$BASH_ENV"
-            "/opt/bin"
-            "/opt/sbin"
-            "/snap/bin"
-            "/flatpak/bin"
-            "$CONDA_PREFIX/bin"
-            )
-            
-    # Add admin dirs to PATH if missing
-    for dir in "${admin_dirs[@]}"; do
-        if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
-            PATH="$PATH:$dir"
-        fi
-    done
-    
-    while IFS= read -r d; do
-        [[ -d "$d" && ":$PATH:" != *":$d:"* ]] && PATH="$PATH:$d"
-    done < <(find $HOME/.local/bin -type d 2>/dev/null)
-    
-        export PATH
+        trap '_ca_restore_path' RETURN
+        _ca_add_admin_paths
    
         # -------------------------
         # Check dependencies
@@ -81,11 +46,11 @@ ca() {
         #--------------------------
         # Reset arrays on first run
         #--------------------------
-        __H_SEEN_ALIASES=()
-        __H_SEEN_COMMANDS=()
-        __H_SEEN_BUILTINS=()
-        __H_SHADOW_SEEN=()
-        __H_VISITED=()
+        __CA_SEEN_ALIASES=()
+        __CA_SEEN_COMMANDS=()
+        __CA_SEEN_BUILTINS=()
+        __CA_SHADOW_SEEN=()
+        __CA_VISITED=()
    
         #--------------------------
         # Greeting
@@ -136,46 +101,56 @@ ca() {
     cmd="${fcmd[0]}"
     
     # -------------------------------------------------------------------------
-    # handle arguments for h
+    # handle arguments for ca
     # -------------------------------------------------------------------------
+    
+    local fzffound=0
+    if command -v fzf &>/dev/null; then
+        fzffound=1
+    fi
+    
     case "$cmd" in
         -h|--help) _ca_usage; return 0;;
         -v|--version) _ca_ver; return 0;;
-        -s|--sourced) printf "\n" && _ca_sourced_files; return 0;;
-        -o|--overridden) printf "\n" && _ca_overridden; return 0;;
-        -p|--path) printf "\n" && _ca_writable_dir_in_path; return 0;;
-        -S|--suid) printf "\n" && _ca_suid_scan; return 0;;
+        -s|--sourced) printf "\n"; _ca_sourced_files; return 0;;
+        -o|--overridden) printf "\n"; _ca_overridden; return 0;;
+        -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;
+        -S|--suid) printf "\n"; _ca_display_suidsgid_scan; return 0;;
         -f|--fzf)
-            if ! command -v fzf &>/dev/null; then
-                printf "fzf not installed\n"
-                return 1
-            fi
-
-            local pick
-            pick=$(compgen -A function -A alias -A builtin -A command | sort -u | fzf --prompt="Get help for: ")
-
-            [[ -n "$pick" ]] || return 1
-            ca "$pick"
-            return 0
-            ;;  
+            if (( fzffound == 1 )); then 
+                local pick
+                pick=$(compgen -A function -A alias -A builtin -A command | sort -u | fzf --prompt="Get help for: ")
+                [[ -n "$pick" ]] || return 1
+                ca "$pick"
+                return 0
+            else
+                printf "%s    ↳ ${YELLOW}fzf is not installed.${RESET}\n" "$indent"
+                printf "\n"
+                _ca_usage;
+                return 0
+            fi  
+            ;; 
     esac
     
     # -------------------------------------------------------------------------
-    # Handle h for now, prevent h from analyzing itself because 
+    # Handle ca for now, prevent ca from analyzing itself because 
     # it will spam the screen with itself
     # -------------------------------------------------------------------------
-    if [[ "$cmd" == "h" ]]; then
+    if [[ "$cmd" == "ca" ]]; then
+            printf "%s├─ Do you speak spanish?\n" "$indent"
             printf "%s├─ Detected ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Showing  ${CYAN}'%s --help'${RESET}:\n\n"  "$indent" "$cmd"
             _ca_usage
-            export OLD_PATH
             return 0
     fi
+    
+    # Edge case that fails with type. catch it here to avoid a crash later.
     if [[ "$cmd" == "]" ]]; then
         printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
         printf "%s    ↳ ${CYAN}%s${RESET} -- Ends a conditional test expression.\n" "$indent" "$cmd"
         return 0
     fi
+    
     # -------------------------------------------------------------------------
     # Split and analyze pipelines, chains, and lists safely
     # -------------------------------------------------------------------------
@@ -203,7 +178,6 @@ ca() {
     if [[ -z "$ctype" ]]; then
         printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$indent" "$cmd"
         printf "%s    ↳ Check your spelling and try again\n\n" "$indent" 
-        export OLD_PATH
         return 1
     fi
 
@@ -340,7 +314,7 @@ ca() {
         printf "%s├─ ${CYAN}'%s' ${RESET}is a shell function\n" "$indent" "$cmd"
         printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$file" "$line"
         printf "%s    ↳ Showing function: ${CYAN}%s${RESET}\n\n"  "$indent" "$cmd"        
-        func_content=$(declare -f "$cmd")
+        local func_content=$(declare -f "$cmd")
         _ca_highlight_script "$func_content" "$indent"
         printf "\n%s    ─── End of function '%s' ───\n" "$indent" "$cmd"    
         return 0
@@ -351,8 +325,8 @@ ca() {
     # -------------------------------------------------------------------------
     if [[ "$ctype" == "alias" ]]; then
         # Avoid re-analyzing the same alias (prevents infinite loops)
-        [[ -n "${__H_SEEN_ALIASES[$cmd]}" ]] && return 0
-        __H_SEEN_ALIASES["$cmd"]=1
+        [[ -n "${__CA_SEEN_ALIASES[$cmd]}" ]] && return 0
+        __CA_SEEN_ALIASES["$cmd"]=1
     
         # Get the alias expansion (strip surrounding quotes)
         raw=$(alias "$cmd")
@@ -412,8 +386,8 @@ ca() {
             local primary="${alias_tokens[0]}"
             # If primary is a function, recurse; otherwise analyze as external or builtin
             if declare -F "$primary" &>/dev/null; then
-                if [[ -z "${__H_VISITED[$primary]}" ]]; then
-                    __H_VISITED["$primary"]=1
+                if [[ -z "${__CA_VISITED[$primary]}" ]]; then
+                    __CA_VISITED["$primary"]=1
                     ca "$primary" $((depth + 1))
                 else
                     printf "%s    ↳ ${CYAN}%s${RESET} already visited — possible cycle\n" "$indent" "$primary"
@@ -581,10 +555,19 @@ ca() {
                 printf "%s    ⎟    ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" "$indent" "$owner_perm" "$group_perm" "$other_perm"
         fi
     
+        local perlfound=0
+        if command -v perl &>/dev/null; then
+            perlfound=1
+        fi
+    
         # Dump script content
         if grep -qiE 'script|text executable' <<< "$file_info"; then
-            printf "%s    ↳ Showing script ${CYAN}'%s'${RESET}:\n\n" "$indent" "$cmd"
+            printf "%s    ↳ Showing script ${CYAN}'%s'${RESET}:\n" "$indent" "$cmd"
+            if (( perlfound == 0 )); then 
+                printf "%s    ↳ ${YELLOW}Optional dependency 'perl' missing — syntax highlighting reduced${RESET}\n" "$indent" 
+            fi           
             if [[ -r "$cmd_path" ]]; then
+                printf "\n"
                 _ca_highlight_script "$cmd_path" "$indent"
                 printf "\n\n%s    ─── End of script '%s' ───\n" "$indent" "$cmd"
             fi
@@ -596,14 +579,12 @@ ca() {
         if (( ${#next_cmd[@]} > 0 )); then
             ca "${next_cmd[*]}" $((depth + 1))
         fi
-    
-        export OLD_PATH 
         return 0
     fi
 }
  
 #------------------------------------------------------------------------
-# Function: _h-usage
+# Function: _ca_usage
 # Purpose : Display usage information and examples for the `h` command analyzer.
 #------------------------------------------------------------------------
 _ca_usage() {
@@ -616,33 +597,29 @@ _ca_usage() {
      Options:
            -h --help or h      Show this help text.
            -v --version        Show version information.
+           -f --fzf            Use fzf to interactivly search for commands     
            -s --sourced        List all sourced files in the enviroment.
            -o --overridden     List all commands that override a command in the enviroment.
            -p --path           list all writable directories in $PATH
-           -S --suid           Scan for SUID binaries
-           
+           -S --suid           Scan for SUID and SGID binaries 
+              
      Examples:
            ca                   # Automatically analyzes your most recent command
            ca sudo              # Analyzes 'sudo'
            ca 'sudo rm'         # Ignores sudo and Analyzes rm
            ca ls                # Is 'ls' a builtin, keyword, alias, function, script or binary?
-
-     Features:
-       • Handles builtins, aliases, keywords, functions, and external commands
-       • Syntax-highlighted preview of functions and scripts
-       • Shows --help/-help/-h/-? output or points to man pages
   
 EOF
 }
 
 #------------------------------------------------------------------------
-# Function: _h-ver
+# Function: _ca_ver
 # Purpose : Display version information.
 #------------------------------------------------------------------------
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.7 — Bash Command Analyzer
+     ca v1.0.12 — Bash Command Analyzer
      Author : John Blair
      Updated: 2025-11-10  
           
@@ -672,6 +649,520 @@ EOF
 }
 
 #------------------------------------------------------------------------
+# Function: _ca_add_admin_paths
+# Purpose: Add ~/.local/bin paths safely and temporarily
+#------------------------------------------------------------------------
+_ca_add_admin_paths() {
+    # Save PATH if not already saved 
+    if [[ -z "$OLD_PATH" ]]; then
+        OLD_PATH="$PATH"
+    fi
+
+    local admin_dirs=(
+            "$HOME/.local/bin"
+            "$HOME/bin/scripts"
+            "$HOME/bin"
+            "$HOME/.cargo/bin"
+            "$HOME/.npm-global/bin"
+            "$HOME/.local/share/bash-completion/bin"
+            "$BASH_ENV"
+            "$CONDA_PREFIX/bin"
+            "/flatpak/bin"         
+            "/snap/bin"
+            "/usr/local/bin"
+            "/usr/local/sbin"
+            "/usr/local/games"
+            "/usr/bin"
+            "/usr/sbin"        
+            "/usr/games"
+            "/bin"
+            "/sbin"  
+            "/opt/bin"
+            "/opt/sbin"         
+            )
+            
+    # Add admin dirs to PATH if missing
+    for dir in "${admin_dirs[@]}"; do
+        if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
+            PATH="$PATH:$dir"
+        fi
+    done
+    
+    while IFS= read -r d; do
+        [[ -d "$d" && ":$PATH:" != *":$d:"* ]] && PATH="$PATH:$d"
+    done < <(find "$HOME/.local/bin" -type d 2>/dev/null)
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_restore_path
+# Automatically restore PATH when leaving scope
+#------------------------------------------------------------------------
+_ca_restore_path() {
+    if [[ -n "$OLD_PATH" ]]; then
+        PATH="$OLD_PATH"
+        unset OLD_PATH
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_completion
+# Purpose : Enable tab completion for entering commands 
+#------------------------------------------------------------------------
+_ca_completion() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local commands
+    
+    trap '_ca_restore_path' RETURN
+    _ca_add_admin_paths
+    
+    # Collect possible completions: aliases, functions, builtins, and executables in PATH
+    mapfile -t commands < <(compgen -A function -A alias -A builtin -A command -- "$cur")
+
+    # Provide them to bash-completion
+    COMPREPLY=("${commands[@]}")
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_expand_vars
+# Purpose : expand variables for aliases so $HOME resolves to /home/jb/ 
+#------------------------------------------------------------------------
+_ca_expand_vars() {
+    local input="$1"
+    # Only expand variables like $HOME, $USER, etc. Use 'printf' with parameter expansion to avoid arbitrary command execution.
+    # Use a small whitelist: HOME, USER, PWD, SHELL
+    local out="$input"
+    [[ -n "$HOME" ]] && out="${out//\$HOME/$HOME}"
+    [[ -n "$USER" ]] && out="${out//\$USER/$USER}"
+    [[ -n "$PWD" ]] && out="${out//\$PWD/$PWD}"
+    [[ -n "$SHELL" ]] && out="${out//\$SHELL/$SHELL}"
+    printf '%s' "$out"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_sourcedtree
+# Purpose: Recursively scan .bashrc for ALL files that are sourced. including conditionals.
+#------------------------------------------------------------------------
+# Global array to track all sourced files
+declare -gA SOURCED_FILES_MAP=()   # associative array to avoid duplicates
+declare -ga SOURCED_FILES_LIST=()  # optional list preserving order
+
+_ca_sourcedtree() {
+    SOURCED_FILES_MAP=()
+    SOURCED_FILES_LIST=()
+    local file files depth max_depth
+    depth=0
+    max_depth="${MAX_DEPTH:-5}"
+    
+    files=(/etc/profile ~/.bash_profile ~/.bash_login ~/.profile /etc/bash.bashrc /etc/bashrc ~/.bashrc $BASH_ENV ~/.bash_aliases ~/.bash_functions ~/.bash_exports ~/.bash_local /usr/share/bash-completion/bash_completion ~/.local/share/bash-completion/bash_completion ~/.oh-my-bash/oh-my-bash.sh ~/.bash_it/bash_it.sh ~/.bash_env) 
+    
+    # Add profile.d scripts manually and safely
+    if [[ -d /etc/profile.d ]]; then
+        files+=( /etc/profile.d/*.sh )
+    fi
+
+    for file in "${files[@]}"; do
+        _ca_sourcedtree_single "$file" "$depth" "$max_depth"
+    done
+}
+
+    #-----------------------------------------------------------
+    # Internal recursive function
+_ca_sourcedtree_single() {
+    local file="${1:-$HOME/.bashrc}"
+    local depth="${2:-0}"
+    local max_depth="${3:-5}"
+    local indent="" i expanded src
+
+    (( depth > max_depth )) && return
+
+    for ((i = 0; i < depth; i++)); do indent+="  "; done
+
+    expanded=$(_ca_expand_path "$file")
+
+    # Skip duplicates
+    [[ -n ${SOURCED_FILES_MAP["$expanded"]} ]] && return
+
+    # count “garbage” paths
+    if [[ ! -f "$expanded" || "$expanded" =~ [\$\*\?\[\]] ]]; then
+        return
+    fi
+    
+    SOURCED_FILES_MAP["$expanded"]=1
+    SOURCED_FILES_LIST+=("$expanded")
+
+    # Extract sourced files
+    while IFS= read -r src; do
+        [[ $src =~ ^[[:space:]]*# ]] && continue
+        [[ $src =~ (^|[[:space:]])(source|\.)[[:space:]]+([^#;]+) ]] || continue
+        src="${BASH_REMATCH[3]}"
+        src=$(_ca_expand_path "$src")
+        _ca_sourcedtree_single "$src" $((depth + 1)) "$max_depth"
+    done < <(grep -E '^\s*(\.|source)\s+' "$expanded" 2>/dev/null)
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_expand_path
+_ca_expand_path() {
+    local p="$1"
+
+    # Strip quotes and whitespace
+    p="${p//\"/}"
+    p="${p//\'/}"
+    p="${p//;/}"
+    p="${p##*( )}"
+    p="${p%%*( )}"
+
+    # Tilde expansion
+    [[ "$p" == "~"* ]] && p="${p/#\~/$HOME}"
+
+    # Replace known environment variables
+    [[ -n "$HOME" ]] && p="${p//\$HOME/$HOME}"
+    [[ -n "$BASH_ENV" ]] && p="${p//\$BASH_ENV/$BASH_ENV}"
+
+    # Convert to absolute path if possible
+    if command -v realpath &>/dev/null && [[ -e "$p" ]]; then
+        p=$(realpath "$p" 2>/dev/null || echo "$p")
+    fi
+
+    printf '%s\n' "$p"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_highlight_script   # _ca_highlight_script "$path-to-script" "<blankspaces>"
+# Purpose: Modular syntax highlighting with indentation based on string in $2
+#
+#        how to add patterns and colors for highlighting
+#
+#  Example usage: To highlight the word forecast in bright magenta:
+#  HIGHLIGHT_PATTERNS+=('\bforecast\b') # your_regex_here
+#  HIGHLIGHT_COLORS+=('\x1b[95m')   # bright magenta - choose the ANSI color
+#
+#  Make sure that HIGHLIGHT_PATTERNS and HIGHLIGHT_COLORS remain aligned by index 
+#  (pattern i uses color i).
+#
+#  Multiple new entries: 
+#  HIGHLIGHT_PATTERNS+=('\bforecast\b' '\bradar\b') # Highlight 'forecast' and 'radar'
+#  HIGHLIGHT_COLORS+=('\x1b[95m' '\x1b[92m')  # bright magenta & bright green
+#------------------------------------------------------------------------
+_ca_highlight_script() {
+    local input="$1"
+    local indent="    "
+
+    # Read file if it exists
+    local code
+    if [[ -f "$input" ]]; then
+        code=$(<"$input")
+    else
+        code="$input"
+    fi
+
+    # Check if Perl is installed if not use sed
+    if ! command -v perl &>/dev/null; then
+        local highlighted
+        local use_color=1
+        local esc=$'\x1b'
+
+        # Disable color if stdout is not a terminal
+        [[ ! -t 1 ]] && use_color=0
+
+        # Read content safely
+        if [[ -f "$input" ]]; then
+            highlighted=$(<"$input")
+        else
+            highlighted="$input"
+        fi
+
+            # Highlight patterns
+        declare -a HIGHLIGHT_PATTERNS=(
+            '#.*'                                 # comments
+            '"[^"]*"|'\''[^'\'']*'\'''            # strings
+            '\$\([^)]*\)|`[^`]*`'                 # subshells
+            '\b(local|declare|export|typeset)\b'  # declarations
+            '\b(if|then|else|elif|fi|for|while|do|done|until|select|case|esac|break|continue)\b' # control
+            '\b(function|return|exit|trap|shift|read|mapfile|set|unset)\b' # builtins
+            '\b(printf|echo|mkdir|find|grep|sed|awk|cut|sort|head|tail|xargs|cat|touch|chmod|chown|curl|wget)\b' # commands
+            '\$[A-Za-z0-9_@#*!?_-]+'             # variables
+            '\b[0-9]+(\.[0-9]+)?\b|0x[0-9A-Fa-f]+' # numbers
+            '\[\[|\]\]|\(\(|\)\)|\(|\)|\{|\}'     # brackets/parens/braces
+        )
+
+        declare -a HIGHLIGHT_COLORS=(
+            "${esc}[36m"    # comments — cyan
+            "${esc}[96m"    # strings — bright cyan
+            "${esc}[35m"    # subshells — magenta
+            "${esc}[32m"    # declarations — green
+            "${esc}[93m"    # control — yellow
+            "${esc}[32m"    # builtins — green
+            "${esc}[35m"    # common commands — magenta
+            "${esc}[33m"    # variables — yellow
+            "${esc}[34m"    # numbers — blue
+            "${esc}[37m"    # brackets — gray
+        )
+
+        # Disable colors if needed
+        if (( use_color == 0 )); then
+            for i in "${!HIGHLIGHT_COLORS[@]}"; do
+                HIGHLIGHT_COLORS[$i]=""
+            done
+        fi
+
+        # Apply highlighting patterns
+        for i in "${!HIGHLIGHT_PATTERNS[@]}"; do
+            local pattern="${HIGHLIGHT_PATTERNS[$i]}"
+            local color="${HIGHLIGHT_COLORS[$i]}"
+            highlighted=$(echo "$highlighted" | sed -E "s/($pattern)/${color}\1${esc}[0m/g")
+        done
+
+        # Print with indentation
+        printf "%s\n" "$highlighted" | sed "s/^/$indent    /"
+        return
+    fi
+    
+    perl - "$code" "$indent" <<'PERL_CODE'
+use strict;
+use warnings;
+
+my $content = $ARGV[0];
+my $indent = $ARGV[1] // "";
+
+# ANSI colors
+my %C = (
+    comment   => "\e[36m",
+    string    => "\e[96m",
+    subshell  => "\e[35m",
+    decl      => "\e[32m",
+    control   => "\e[93m",
+    builtin   => "\e[32m",
+    command   => "\e[35m",
+    variable  => "\e[33m",
+    number    => "\e[34m",
+    bracket   => "\e[37m",
+    reset     => "\e[0m",
+);
+
+# Patterns for syntax highlighting
+my @patterns = (
+    { regex => qr/("(?:[^"\\]|\\.)*")/,       color => 'string' },
+    { regex => qr/('(?:[^'\\]|\\.)*')/,       color => 'string' },
+    { regex => qr/\$\((?:[^()]+|(?R))*\)/x,   color => 'subshell' },
+    { regex => qr/`[^`]*`/,                    color => 'subshell' },
+    { regex => qr/\b(local|declare|export|typeset)\b/, color => 'decl' },
+    { regex => qr/\b(if|then|else|elif|fi|for|while|do|done|until|select|case|esac|break|continue)\b/, color => 'control' },
+    { regex => qr/\b(function|return|exit|trap|shift|read|mapfile|set|unset)\b/, color => 'builtin' },
+    { regex => qr/\b(printf|echo|mkdir|find|grep|sed|awk|cut|sort|head|tail|xargs|cat|touch|chmod|chown|curl|wget)\b/, color => 'command' },
+    { regex => qr/\$[A-Za-z0-9_@#*!?_-]+/, color => 'variable' },
+    { regex => qr/\b[0-9]+(\.[0-9]+)?\b|0x[0-9A-Fa-f]+/, color => 'number' },
+    { regex => qr/\[\[|\]\]|\(\(|\)\)|\(|\)|\{|\}/, color => 'bracket' },
+    { regex => qr/#.*/, color => 'comment' },
+);
+
+sub highlight {
+    my ($line, $indent) = @_;
+    foreach my $p (@patterns) {
+        $line =~ s/($p->{regex})/$C{$p->{color}}$1$C{reset}/g;
+    }
+    return $indent . $line;
+}
+
+for my $line (split /\n/, $content) {
+    print highlight($line, $indent), "\n";
+}
+PERL_CODE
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_check_dependencies
+# Purpose : Check core and optional dependencies, optionally exit on missing core deps
+# Usage   : _ca_check_dependencies needed_deps optional_deps [EXIT_ON_MISSING] 0or1
+#------------------------------------------------------------------------
+needed_deps=(grep basename file find sed cut head readlink realpath dpkg awk ldd getcap)
+optional_deps=(tput fzf perl)
+
+_ca_check_dependencies() {
+    local -n required="$1"    # Required dependencies (pass by name)
+    local -n optional="$2"    # Optional dependencies (pass by name)
+    local exit_on_missing="${3:-1}"  # Default: exit if required deps missing
+
+    local missing_required=()
+    local missing_optional=()
+
+    # Check required dependencies
+    for cmd in "${required[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing_required+=("$cmd")
+    done
+
+    # Check optional dependencies
+    for cmd in "${optional[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing_optional+=("$cmd")
+    done
+
+    # Report missing required deps
+    if (( ${#missing_required[@]} )); then
+        printf "${RED}Warning: Missing REQUIRED tools: %s${RESET}\n" "${missing_required[*]}"
+        (( exit_on_missing )) && { printf "Exiting due to missing core dependencies.\n"; exit 1; }
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_overridden                         
+# Purpose : list all commands that override another command
+#------------------------------------------------------------------------
+_ca_overridden() {
+    _ca_alias_override
+    printf "\n"  
+    _ca_function_override
+    printf "\n"  
+    _ca_builtin_override
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_alias_override                         
+# Purpose : list all aliases that override a command
+#------------------------------------------------------------------------
+_ca_alias_override() { 
+    local acmd list akind
+    local flag=0
+    
+    printf "%s├─ Examining aliases to detect overridden commands:\n" "$indent"
+
+    while IFS= read -r acmd; do
+        mapfile -t list < <(type -at "$acmd")
+
+        # Deduplicate results
+        declare -A seen=()
+        local uniq=()
+        for akind in "${list[@]}"; do
+            [[ ${seen[$akind]} ]] && continue
+            uniq+=("$akind")
+            seen[$akind]=1
+        done
+
+        for akind in "${uniq[@]}"; do
+            case "$akind" in
+                builtin)
+                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$indent" "$acmd"
+                    flag=1 ;;
+                file)
+                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$indent" "$acmd"
+                    flag=1 ;;
+            esac
+        done
+    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
+
+    if (( flag == 0 )); then
+        printf "%s    ↳ ${CYAN}No command or builtin is overridden.${RESET}\n" "$indent"
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_function_override                         
+# Purpose : list all functions that override a command
+#------------------------------------------------------------------------
+_ca_function_override() { 
+    local funcmd kind kinds 
+    local func_flag=0
+
+    printf "%s├─ Examining functions to detect overridden commands:\n" "$indent"
+
+    # Get list of function names
+    while read -r funcmd; do
+        mapfile -t kinds < <(type -at "$funcmd")
+
+        for kind in "${kinds[@]}"; do
+            case "$kind" in
+                alias)
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides an alias of the same name.\n" "$indent" "$funcmd"
+                    func_flag=1
+                    ;;
+                keyword)
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} conflicts with a shell keyword of the same name (keyword takes precedence).\n" "$indent" "$funcmd"
+                    func_flag=1
+                    ;;
+                builtin)
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$indent" "$funcmd"
+                    func_flag=1
+                    ;;
+                file)
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$indent" "$funcmd"
+                    func_flag=1
+                    ;;
+            esac
+        done
+    done < <(declare -F | awk '{print $3}')
+
+    if [[ $func_flag -eq 0 ]]; then
+        printf "%s    ↳ No command or builtin is overridden.\n" "$indent"
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_builtin_override
+# Purpose : list builtins that are disabled and note if external commands replace them
+#------------------------------------------------------------------------
+_ca_builtin_override() {
+    printf "%s├─ Examining disabled builtins to identify any replacement commands:\n" "$indent"
+
+    local b disabled=()
+
+    # Collect disabled builtins
+    while read -r b; do
+        disabled+=("${b#enable -n }")
+    done < <(enable -a | grep '^enable -n ')
+
+    if (( ${#disabled[@]} == 0 )); then
+        printf "%s    ↳ No builtins are disabled.\n" "$indent"
+        return
+    fi
+
+    local name
+    for name in "${disabled[@]}"; do
+        printf "%s    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$indent" "$name"
+
+        # 1. Alias replacement?
+        if alias "$name" &>/dev/null; then
+            adef=$(allias "$name")
+            printf "%s       • Alias ${YELLOW}'%s' -- '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$adef"
+            continue
+        fi
+
+        # 2. Function replacement?
+        if declare -F "$name" &>/dev/null; then
+            printf "%s       • Function ${YELLOW}'%s'${RESET} now replaces the builtin.\n" "$indent" "$name"
+            continue
+        fi
+
+        # 3. External command replacement?
+        if command -v "$name" &>/dev/null; then
+            local newpath=$(command -v "$name")
+            printf "%s       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$newpath"
+        else
+            printf "%s       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$indent" "$name"
+        fi
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_display_suidsgid_scan
+# Purpose : Display SUID / SGID binaries
+#------------------------------------------------------------------------
+_ca_display_suidsgid_scan() {
+    _ca_suid_scan
+    printf "\n"
+    _ca_sgid_scan
+}
+#------------------------------------------------------------------------
+# Function: _ca_sgid_scan
+# Purpose : Scan for SGID binaries
+#------------------------------------------------------------------------
+_ca_sgid_scan() {
+    printf "├─ Scanning for SGID binaries:\n"
+
+    while IFS= read -r hitg; do
+        printf "    ↳ %s\n" "$hitg"
+    done < <(find / -perm -2000 -type f -exec ls -l {} + 2>/dev/null)
+}
+
+#------------------------------------------------------------------------
 # Function: _ca_suid_scan
 # Purpose : Scan for SUID binaries
 #------------------------------------------------------------------------
@@ -682,19 +1173,7 @@ _ca_suid_scan() {
         printf "    ↳ %s\n" "$hit"
     done < <(find / -perm -4000 -type f -exec ls -l {} + 2>/dev/null)
 }
-_ca_suid_scan2() {
-    printf "├─ Scanning for SUID binaries (parallelized):\n"
 
-    # Export function for xargs (optional if using simple command)
-    export -f
-
-    # Find SUID files and list them in parallel
-    find / -perm -4000 -type f 2>/dev/null \
-        | xargs -P 8 -I {} ls -l {} 2>/dev/null \
-        | while IFS= read -r hit; do
-            printf "    ↳ %s\n" "$hit"
-        done
-}
 #------------------------------------------------------------------------
 # Function: _ca_writable_dir_in_path
 # Purpose : Detect writable directories in $PATH
@@ -990,176 +1469,24 @@ _ca_parse_commands() {
         local args=("${tokens[@]:1}")
 
         # Skip already seen alias recursion in this parse (avoid infinite)
-        if [[ -n "${__H_SEEN_ALIASES[$cmd_name]}" ]]; then
+        if [[ -n "${__CA_SEEN_ALIASES[$cmd_name]}" ]]; then
             out_arr+=("$cmd_name")
             continue
         fi
 
         if alias "$cmd_name" &>/dev/null; then
-            __H_SEEN_ALIASES[$cmd_name]=1
+            __CA_SEEN_ALIASES[$cmd_name]=1
             local expansion
             expansion=$(alias "$cmd_name" | sed -E "s/^alias $cmd_name='(.*)'$/\1/")
             out_arr+=("$cmd_name")
             # we do not expand inline here — return token to caller for further analysis
         elif declare -f "$cmd_name" &>/dev/null; then
-            __H_SEEN_ALIASES[$cmd_name]=1
+            __CA_SEEN_ALIASES[$cmd_name]=1
             out_arr+=("$cmd_name")
         else
             out_arr+=("$cmd_name")
         fi
     done
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_completion
-# Purpose : Enable tab completion for entering commands 
-#------------------------------------------------------------------------
-_ca_completion() {
-    local cur="${COMP_WORDS[COMP_CWORD]}"
-    local commands
-
-    local admin_dirs=(
-            "$HOME/.local/bin"
-            "$HOME/bin/scripts"
-            "$HOME/bin"
-            "/usr/local/bin"
-            "/usr/local/sbin"
-            "/usr/local/games"
-            "/usr/bin"
-            "/usr/sbin"        
-            "/usr/games"
-            "/bin"
-            "/sbin"   
-            "$HOME/.cargo/bin"
-            "$HOME/.npm-global/bin"
-            "$HOME/.local/share/bash-completion/bin"
-            "$BASH_ENV"
-            "/opt/bin"
-            "/opt/sbin"
-            "/snap/bin"
-            "/flatpak/bin"
-            "$CONDA_PREFIX/bin"
-            )
-            
-    # Add admin dirs to PATH if missing
-    for dir in "${admin_dirs[@]}"; do
-        if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
-            PATH="$PATH:$dir"
-        fi
-    done
-    
-    while IFS= read -r d; do
-        [[ -d "$d" && ":$PATH:" != *":$d:"* ]] && PATH="$PATH:$d"
-    done < <(find $HOME/.local/bin -type d 2>/dev/null)
-    
-    # Collect possible completions: aliases, functions, builtins, and executables in PATH
-    commands=$(compgen -A function -A alias -A builtin -A command -- "$cur")
-    
-    PATH="$OLD_PATH" 
-    # Return completions
-    COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_expand_vars
-# Purpose : expand variables for aliases so $HOME resolves to /home/jb/ 
-#------------------------------------------------------------------------
-_ca_expand_vars() {
-    local input="$1"
-    # Only expand variables like $HOME, $USER, etc. Use 'printf' with parameter expansion to avoid arbitrary command execution.
-    # Use a small whitelist: HOME, USER, PWD, SHELL
-    local out="$input"
-    [[ -n "$HOME" ]] && out="${out//\$HOME/$HOME}"
-    [[ -n "$USER" ]] && out="${out//\$USER/$USER}"
-    [[ -n "$PWD" ]] && out="${out//\$PWD/$PWD}"
-    [[ -n "$SHELL" ]] && out="${out//\$SHELL/$SHELL}"
-    printf '%s' "$out"
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_sourcedtree
-# Purpose: Recursively scan .bashrc for ALL files that are sourced. including conditionals.
-#------------------------------------------------------------------------
-# Global array to track all sourced files
-declare -gA SOURCED_FILES_MAP=()   # associative array to avoid duplicates
-declare -ga SOURCED_FILES_LIST=()  # optional list preserving order
-
-_ca_sourcedtree() {
-    SOURCED_FILES_MAP=()
-    SOURCED_FILES_LIST=()
-    local file files depth max_depth
-    depth=0
-    max_depth="${MAX_DEPTH:-5}"
-    
-    shopt -s nullglob
-    files=(~/.bash_profile ~/.bash_login ~/.profile ~/.bashrc ~/.bash_aliases ~/.bash_functions ~/.bash_exports ~/.bash_local ~/.local/share/bash-completion/bash_completion /etc/profile /etc/bash.bashrc /etc/bashrc /etc/profile.d/ /usr/share/bash-completion/bash_completion ~/.config/bash/bashrc ~/.bash/bashrc ~/.dotfiles/bash/ ~/.dotfiles/bashrc ~/.oh-my-bash/oh-my-bash.sh ~/.bash_it/bash_it.sh ~/.conda/etc/profile.d/conda.sh ~/.config ~/.bash_env /etc/profile.d/*.sh $BASH_ENV) 
-    shopt -u nullglob
-
-    for file in "${files[@]}"; do
-        _ca_sourcedtree_single "$file" "$depth" "$max_depth"
-    done
-}
-
-    #-----------------------------------------------------------
-    # Internal recursive function
-_ca_sourcedtree_single() {
-    local file="${1:-$HOME/.bashrc}"
-    local depth="${2:-0}"
-    local max_depth="${3:-5}"
-    local indent="" i expanded src
-
-    (( depth > max_depth )) && return
-
-    for ((i = 0; i < depth; i++)); do indent+="  "; done
-
-    expanded=$(_ca_expand_path "$file")
-
-    # Skip duplicates
-    [[ -n ${SOURCED_FILES_MAP["$expanded"]} ]] && return
-
-    # count “garbage” paths
-    if [[ ! -f "$expanded" || "$expanded" =~ [\$\*\?\[\]] ]]; then
-        return
-    fi
-    
-    SOURCED_FILES_MAP["$expanded"]=1
-    SOURCED_FILES_LIST+=("$expanded")
-
-    # Extract sourced files
-    while IFS= read -r src; do
-        [[ $src =~ ^[[:space:]]*# ]] && continue
-        [[ $src =~ (^|[[:space:]])(source|\.)[[:space:]]+([^#;]+) ]] || continue
-        src="${BASH_REMATCH[3]}"
-        src=$(_ca_expand_path "$src")
-        _ca_sourcedtree_single "$src" $((depth + 1)) "$max_depth"
-    done < <(grep -E '^\s*(\.|source)\s+' "$expanded" 2>/dev/null)
-}
-
-    #-----------------------------------------------------------
-    # Helper: _ca_expand_path
-_ca_expand_path() {
-    local p="$1"
-
-    # Strip quotes and whitespace
-    p="${p//\"/}"
-    p="${p//\'/}"
-    p="${p//;/}"
-    p="${p##*( )}"
-    p="${p%%*( )}"
-
-    # Tilde expansion
-    [[ "$p" == "~"* ]] && p="${p/#\~/$HOME}"
-
-    # Replace known environment variables
-    [[ -n "$HOME" ]] && p="${p//\$HOME/$HOME}"
-    [[ -n "$BASH_ENV" ]] && p="${p//\$BASH_ENV/$BASH_ENV}"
-
-    # Convert to absolute path if possible
-    if command -v realpath &>/dev/null && [[ -e "$p" ]]; then
-        p=$(realpath "$p" 2>/dev/null || echo "$p")
-    fi
-
-    printf '%s\n' "$p"
 }
 
 #------------------------------------------------------------------------
@@ -1177,254 +1504,6 @@ _ca_sourced_files() {
     done
     printf "\n      End of list\n"
 }        
-
-#------------------------------------------------------------------------
-# Function: _ca_highlight_script   # _ca_highlight_script "$path-to-script" "<blankspaces>"
-# Purpose: Modular syntax highlighting with indentation based on string in $2
-#------------------------------------------------------------------------
-_ca_highlight_script() {
-    local input="$1"
-    local indent="    "
-
-    # Read file if it exists
-    local code
-    if [[ -f "$input" ]]; then
-        code=$(<"$input")
-    else
-        code="$input"
-    fi
-    
-    perl - "$code" "$indent" <<'PERL_CODE'
-use strict;
-use warnings;
-
-my $content = $ARGV[0];
-my $indent = $ARGV[1] // "";
-
-# ANSI colors
-my %C = (
-    comment   => "\e[36m",
-    string    => "\e[96m",
-    subshell  => "\e[35m",
-    decl      => "\e[32m",
-    control   => "\e[93m",
-    builtin   => "\e[32m",
-    command   => "\e[35m",
-    variable  => "\e[33m",
-    number    => "\e[34m",
-    bracket   => "\e[37m",
-    reset     => "\e[0m",
-);
-
-# Patterns for syntax highlighting
-my @patterns = (
-    { regex => qr/("(?:[^"\\]|\\.)*")/,       color => 'string' },
-    { regex => qr/('(?:[^'\\]|\\.)*')/,       color => 'string' },
-    { regex => qr/\$\((?:[^()]+|(?R))*\)/x,   color => 'subshell' },
-    { regex => qr/`[^`]*`/,                    color => 'subshell' },
-    { regex => qr/\b(local|declare|export|typeset)\b/, color => 'decl' },
-    { regex => qr/\b(if|then|else|elif|fi|for|while|do|done|until|select|case|esac|break|continue)\b/, color => 'control' },
-    { regex => qr/\b(function|return|exit|trap|shift|read|mapfile|set|unset)\b/, color => 'builtin' },
-    { regex => qr/\b(printf|echo|mkdir|find|grep|sed|awk|cut|sort|head|tail|xargs|cat|touch|chmod|chown|curl|wget)\b/, color => 'command' },
-    { regex => qr/\$[A-Za-z0-9_@#*!?_-]+/, color => 'variable' },
-    { regex => qr/\b[0-9]+(\.[0-9]+)?\b|0x[0-9A-Fa-f]+/, color => 'number' },
-    { regex => qr/\[\[|\]\]|\(\(|\)\)|\(|\)|\{|\}/, color => 'bracket' },
-    { regex => qr/#.*/, color => 'comment' },
-);
-
-sub highlight {
-    my ($line, $indent) = @_;
-    foreach my $p (@patterns) {
-        $line =~ s/($p->{regex})/$C{$p->{color}}$1$C{reset}/g;
-    }
-    return $indent . $line;
-}
-
-for my $line (split /\n/, $content) {
-    print highlight($line, $indent), "\n";
-}
-PERL_CODE
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_check_dependencies
-# Purpose : Check core and optional dependencies, warn user, optionally exit on missing core deps
-# Usage   : _ca_check_dependencies needed_deps optional_deps [EXIT_ON_MISSING] 0or1
-#------------------------------------------------------------------------
-
-needed_deps=(grep sed head readlink file ldd getcap perl)
-optional_deps=(dpkg find realpath cut awk xargs tput)
-
-_ca_check_dependencies() {
-    local -n required="$1"    # Required dependencies (pass by name)
-    local -n optional="$2"    # Optional dependencies (pass by name)
-    local exit_on_missing="${3:-1}"  # Default: exit if required deps missing
-
-    local missing_required=()
-    local missing_optional=()
-
-    # Check required dependencies
-    for cmd in "${required[@]}"; do
-        command -v "$cmd" >/dev/null 2>&1 || missing_required+=("$cmd")
-    done
-
-    # Check optional dependencies
-    for cmd in "${optional[@]}"; do
-        command -v "$cmd" >/dev/null 2>&1 || missing_optional+=("$cmd")
-    done
-
-    # Report missing required deps
-    if (( ${#missing_required[@]} )); then
-        printf "${RED}Warning: Missing REQUIRED tools: %s${RESET}\n" "${missing_required[*]}"
-        printf "Some core features of the script may not work!\n"
-        (( exit_on_missing )) && { printf "Exiting due to missing core dependencies.\n"; exit 1; }
-    fi
-
-    # Report missing optional deps
-    if (( ${#missing_optional[@]} )); then
-        printf "${YELLOW}Note: Missing optional tools: %s${RESET}\n" "${missing_optional[*]}"
-        printf "Some optional features may not work.\n"
-    fi
-
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_overridden                         
-# Purpose : list all commands that override another command
-#------------------------------------------------------------------------
-_ca_overridden() {
-    _ca_alias_override
-    printf "\n"  
-    _ca_function_override
-    printf "\n"  
-    _ca_builtin_override
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_alias_override                         
-# Purpose : list all aliases that override a command
-#------------------------------------------------------------------------
-_ca_alias_override() { 
-    local acmd list akind
-    local flag=0
-    
-    printf "%s├─ Examining aliases to detect overridden commands:\n" "$indent"
-
-    while IFS= read -r acmd; do
-        mapfile -t list < <(type -at "$acmd")
-
-        # Deduplicate results
-        declare -A seen=()
-        local uniq=()
-        for akind in "${list[@]}"; do
-            [[ ${seen[$akind]} ]] && continue
-            uniq+=("$akind")
-            seen[$akind]=1
-        done
-
-        for akind in "${uniq[@]}"; do
-            case "$akind" in
-                builtin)
-                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$indent" "$acmd"
-                    flag=1 ;;
-                file)
-                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$indent" "$acmd"
-                    flag=1 ;;
-            esac
-        done
-    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
-
-    if (( flag == 0 )); then
-        printf "%s    ↳ ${CYAN}No command or builtin is overridden.${RESET}\n" "$indent"
-    fi
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_function_override                         
-# Purpose : list all functions that override a command
-#------------------------------------------------------------------------
-_ca_function_override() { 
-    local funcmd kind kinds 
-    local func_flag=0
-
-    printf "%s├─ Examining functions to detect overridden commands:\n" "$indent"
-
-    # Get list of function names
-    while read -r funcmd; do
-        mapfile -t kinds < <(type -at "$funcmd")
-
-        for kind in "${kinds[@]}"; do
-            case "$kind" in
-                alias)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides an alias of the same name.\n" "$indent" "$funcmd"
-                    func_flag=1
-                    ;;
-                keyword)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} conflicts with a shell keyword of the same name (keyword takes precedence).\n" "$indent" "$funcmd"
-                    func_flag=1
-                    ;;
-                builtin)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$indent" "$funcmd"
-                    func_flag=1
-                    ;;
-                file)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$indent" "$funcmd"
-                    func_flag=1
-                    ;;
-            esac
-        done
-    done < <(declare -F | awk '{print $3}')
-
-    if [[ $func_flag -eq 0 ]]; then
-        printf "%s    ↳ No command or builtin is overridden.\n" "$indent"
-    fi
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_builtin_override
-# Purpose : list builtins that are disabled and note if external commands replace them
-#------------------------------------------------------------------------
-_ca_builtin_override() {
-    printf "%s├─ Examining disabled builtins to identify any replacement commands:\n" "$indent"
-
-    local b disabled=()
-
-    # Collect disabled builtins
-    while read -r b; do
-        disabled+=("${b#enable -n }")
-    done < <(enable -a | grep '^enable -n ')
-
-    if (( ${#disabled[@]} == 0 )); then
-        printf "%s    ↳ No builtins are disabled.\n" "$indent"
-        return
-    fi
-
-    local name
-    for name in "${disabled[@]}"; do
-        printf "%s    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$indent" "$name"
-
-        # 1. Alias replacement?
-        if alias "$name" &>/dev/null; then
-            adef=$(allias "$name")
-            printf "%s       • Alias ${YELLOW}'%s' -- '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$adef"
-            continue
-        fi
-
-        # 2. Function replacement?
-        if declare -F "$name" &>/dev/null; then
-            printf "%s       • Function ${YELLOW}'%s'${RESET} now replaces the builtin.\n" "$indent" "$name"
-            continue
-        fi
-
-        # 3. External command replacement?
-        if command -v "$name" &>/dev/null; then
-            local newpath=$(command -v "$name")
-            printf "%s       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$newpath"
-        else
-            printf "%s       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$indent" "$name"
-        fi
-    done
-}
 
 #------------------------------------------------------------------------
 # End of script
