@@ -1,3 +1,8 @@
+V1.0.12 
+     code cleanup. ui bug fixes.
+     PATH manipulation code consolidated, broken out to a function
+     PATH restoration handled by new function and a trap on return
+
 V1.0.7
      Enhanced <TAB> completion, and PATH detection.
      Code cleanup.
