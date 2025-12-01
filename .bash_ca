@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #------------------------------------------------------------------------
-# ca  aka .bash_ca                                     ┌──────┐
-# Main Function: ca                                    │      │ 
-#                                                      └──────┘
+# ca  aka .bash_ca           ┌──────┐ │      │ └──────┘
+# Main Function: ca                                                                         
 # Purpose: Analyzes a Bash command, alias, builtin, keyword, function, or binary
 #------------------------------------------------------------------------
 # If not running interactively, don't do anything
@@ -115,7 +114,7 @@ ca() {
         -s|--sourced) printf "\n"; _ca_sourced_files; return 0;;
         -o|--overridden) printf "\n"; _ca_overridden; return 0;;
         -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;
-        -S|--suid) printf "\n"; _ca_display_suidsgid_scan; return 0;;
+        -S|--scan) printf "\n"; _ca_display_scan; return 0;;
         -f|--fzf)
             if (( fzffound == 1 )); then 
                 local pick
@@ -428,7 +427,10 @@ ca() {
             cmd_path="$cmd_real"
             printf "%s    ↳ Now Examining: ${BPURP}%s${RESET}\n" "$indent" "$cmd_real"
         fi
-
+        
+        local base=$(basename "$cmd_real")
+        _ca_show_shadowing "$base" "$cmd_real"
+        
         # Executable Type
         if grep -qiE 'script|text executable' <<< "$file_info"; then
             printf "%s    ↳ Executable Type: ${CYAN}Script / Text executable${RESET}\n" "$indent"
@@ -542,19 +544,51 @@ ca() {
 
         # Permissions
         if [[ -x "$cmd_path" ]]; then
-            local perms octal owner_grp owner_perm group_perm other_perm
+            local perms octal owner_grp owner_perm group_perm other_perm risk_color
+            local sid=""
             perms=$(stat -c "%A" "$cmd_path")
             octal=$(stat -c "%a" "$cmd_path")
             owner_grp=$(stat -c "%U:%G" "$cmd_path")
+
             owner_perm="${perms:1:3}"
             group_perm="${perms:4:3}"
             other_perm="${perms:7:3}"
 
-            printf "%s    ↳ Permissions: ${CYAN}%s${RESET} (octal: ${CYAN}%s${RESET})\n" "$indent" "$perms" "$octal"
-                printf "%s    ⎟    ↳ Owner/Group: ${CYAN}%s${RESET}\n" "$indent" "$owner_grp"
-                printf "%s    ⎟    ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" "$indent" "$owner_perm" "$group_perm" "$other_perm"
+            # Determine risk level
+            if [[ ${owner_perm:2:1} =~ [sS] ]]; then
+                risk_color="${RED}"      # SUID → high risk
+                sid="[SUID]"
+            elif [[ ${group_perm:2:1} =~ [sS] ]]; then
+                risk_color="${YELLOW}"   # SGID → medium risk
+                sid="[SGID]"
+            elif [[ ${other_perm} =~ w ]]; then
+                risk_color="${RED}"      # world write → very risky
+                sid="[World Writable]"  
+            else
+                risk_color="${GREEN}"    # normal → safe
+            fi
+
+            # Highlight the s or S in yellow
+            if [[ ${owner_perm:2:1} =~ [sS] ]]; then
+                owner_perm="${owner_perm:0:2}${RED}${owner_perm:2:1}${RESET}"
+            fi
+
+            if [[ ${group_perm:2:1} =~ [sS] ]]; then
+                group_perm="${group_perm:0:2}${YELLOW}${group_perm:2:1}${RESET}"
+            fi
+
+            # Output
+            printf "%s    ↳ Permissions: %s%s%s (octal: %s%s%s)  %s%s%s\n" \
+                "$indent" "$risk_color" "$perms" "$RESET" \
+                "$risk_color" "$octal" "$RESET" "$risk_color" "$sid" "$RESET"
+
+            printf "%s    ⎟    ↳ Owner/Group: ${CYAN}%s${RESET}\n" \
+                "$indent" "$owner_grp"
+
+            printf "%s    ⎟    ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" \
+                "$indent" "$owner_perm" "$group_perm" "$other_perm"
         fi
-    
+        
         local perlfound=0
         if command -v perl &>/dev/null; then
             perlfound=1
@@ -582,7 +616,7 @@ ca() {
         return 0
     fi
 }
- 
+
 #------------------------------------------------------------------------
 # Function: _ca_usage
 # Purpose : Display usage information and examples for the `h` command analyzer.
@@ -599,14 +633,13 @@ _ca_usage() {
            -v --version        Show version information.
            -f --fzf            Use fzf to interactivly search for commands     
            -s --sourced        List all sourced files in the enviroment.
-           -o --overridden     List all commands that override a command in the enviroment.
-           -p --path           list all writable directories in $PATH
-           -S --suid           Scan for SUID and SGID binaries 
+           -o --overridden     List all commands that override another command in the enviroment.
+           -p --path           list all directories in $PATH and highlight writable directories.
+           -S --scan           Scan for SUID and SGID binaries and World Writable directories.
               
      Examples:
            ca                   # Automatically analyzes your most recent command
-           ca sudo              # Analyzes 'sudo'
-           ca 'sudo rm'         # Ignores sudo and Analyzes rm
+           ca awk               # Analyzes 'awk'
            ca ls                # Is 'ls' a builtin, keyword, alias, function, script or binary?
   
 EOF
@@ -619,7 +652,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.12 — Bash Command Analyzer
+     ca v1.0.15 — Bash Command Analyzer
      Author : John Blair
      Updated: 2025-11-10  
           
@@ -803,6 +836,7 @@ _ca_sourcedtree_single() {
         src=$(_ca_expand_path "$src")
         _ca_sourcedtree_single "$src" $((depth + 1)) "$max_depth"
     done < <(grep -E '^\s*(\.|source)\s+' "$expanded" 2>/dev/null)
+
 }
 
     #-----------------------------------------------------------
@@ -863,6 +897,64 @@ _ca_highlight_script() {
 
     # Check if Perl is installed if not use sed
     if ! command -v perl &>/dev/null; then
+        _ca_sed_highlight
+    fi
+    
+    perl - "$code" "$indent" <<'PERL_CODE'
+use strict;
+use warnings;
+
+my $content = $ARGV[0];
+my $indent = $ARGV[1] // "";
+
+# ANSI colors
+my %C = (
+    comment   => "\e[36m",
+    string    => "\e[96m",
+    subshell  => "\e[35m",
+    decl      => "\e[32m",
+    control   => "\e[93m",
+    builtin   => "\e[32m",
+    command   => "\e[35m",
+    variable  => "\e[33m",
+    number    => "\e[34m",
+    bracket   => "\e[37m",
+    reset     => "\e[0m",
+);
+
+# Patterns for syntax highlighting
+my @patterns = (
+    { regex => qr/("(?:[^"\\]|\\.)*")/,       color => 'string' },
+    { regex => qr/('(?:[^'\\]|\\.)*')/,       color => 'string' },
+    { regex => qr/\$\((?:[^()]+|(?R))*\)/x,   color => 'subshell' },
+    { regex => qr/`[^`]*`/,                    color => 'subshell' },
+    { regex => qr/\b(local|declare|export|typeset)\b/, color => 'decl' },
+    { regex => qr/\b(if|then|else|elif|fi|for|while|do|done|until|select|case|esac|break|continue)\b/, color => 'control' },
+    { regex => qr/\b(function|return|exit|trap|shift|read|mapfile|set|unset)\b/, color => 'builtin' },
+    { regex => qr/\b(printf|echo|mkdir|find|grep|sed|awk|cut|sort|head|tail|xargs|cat|touch|chmod|chown|curl|wget)\b/, color => 'command' },
+    { regex => qr/\$[A-Za-z0-9_@#*!?_-]+/, color => 'variable' },
+    { regex => qr/\b[0-9]+(\.[0-9]+)?\b|0x[0-9A-Fa-f]+/, color => 'number' },
+    { regex => qr/\[\[|\]\]|\(\(|\)\)|\(|\)|\{|\}/, color => 'bracket' },
+    { regex => qr/#.*/, color => 'comment' },
+);
+
+sub highlight {
+    my ($line, $indent) = @_;
+    foreach my $p (@patterns) {
+        $line =~ s/($p->{regex})/$C{$p->{color}}$1$C{reset}/g;
+    }
+    return $indent . $line;
+}
+
+for my $line (split /\n/, $content) {
+    print highlight($line, $indent), "\n";
+}
+PERL_CODE
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_sed_highlight - fallback if perl is unavailable
+_ca_sed_highlight() {
         local highlighted
         local use_color=1
         local esc=$'\x1b'
@@ -921,58 +1013,6 @@ _ca_highlight_script() {
         # Print with indentation
         printf "%s\n" "$highlighted" | sed "s/^/$indent    /"
         return
-    fi
-    
-    perl - "$code" "$indent" <<'PERL_CODE'
-use strict;
-use warnings;
-
-my $content = $ARGV[0];
-my $indent = $ARGV[1] // "";
-
-# ANSI colors
-my %C = (
-    comment   => "\e[36m",
-    string    => "\e[96m",
-    subshell  => "\e[35m",
-    decl      => "\e[32m",
-    control   => "\e[93m",
-    builtin   => "\e[32m",
-    command   => "\e[35m",
-    variable  => "\e[33m",
-    number    => "\e[34m",
-    bracket   => "\e[37m",
-    reset     => "\e[0m",
-);
-
-# Patterns for syntax highlighting
-my @patterns = (
-    { regex => qr/("(?:[^"\\]|\\.)*")/,       color => 'string' },
-    { regex => qr/('(?:[^'\\]|\\.)*')/,       color => 'string' },
-    { regex => qr/\$\((?:[^()]+|(?R))*\)/x,   color => 'subshell' },
-    { regex => qr/`[^`]*`/,                    color => 'subshell' },
-    { regex => qr/\b(local|declare|export|typeset)\b/, color => 'decl' },
-    { regex => qr/\b(if|then|else|elif|fi|for|while|do|done|until|select|case|esac|break|continue)\b/, color => 'control' },
-    { regex => qr/\b(function|return|exit|trap|shift|read|mapfile|set|unset)\b/, color => 'builtin' },
-    { regex => qr/\b(printf|echo|mkdir|find|grep|sed|awk|cut|sort|head|tail|xargs|cat|touch|chmod|chown|curl|wget)\b/, color => 'command' },
-    { regex => qr/\$[A-Za-z0-9_@#*!?_-]+/, color => 'variable' },
-    { regex => qr/\b[0-9]+(\.[0-9]+)?\b|0x[0-9A-Fa-f]+/, color => 'number' },
-    { regex => qr/\[\[|\]\]|\(\(|\)\)|\(|\)|\{|\}/, color => 'bracket' },
-    { regex => qr/#.*/, color => 'comment' },
-);
-
-sub highlight {
-    my ($line, $indent) = @_;
-    foreach my $p (@patterns) {
-        $line =~ s/($p->{regex})/$C{$p->{color}}$1$C{reset}/g;
-    }
-    return $indent . $line;
-}
-
-for my $line (split /\n/, $content) {
-    print highlight($line, $indent), "\n";
-}
-PERL_CODE
 }
 
 #------------------------------------------------------------------------
@@ -1147,13 +1187,15 @@ _ca_builtin_override() {
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_display_suidsgid_scan
+# Function: _ca_display_scan
 # Purpose : Display SUID / SGID binaries
 #------------------------------------------------------------------------
-_ca_display_suidsgid_scan() {
+_ca_display_scan() {
     _ca_suid_scan
     printf "\n"
     _ca_sgid_scan
+    printf "\n"
+    _ca_find_world_writable_dirs
 }
 #------------------------------------------------------------------------
 # Function: _ca_sgid_scan
@@ -1163,7 +1205,7 @@ _ca_sgid_scan() {
     printf "├─ Scanning for SGID binaries:\n"
 
     while IFS= read -r hitg; do
-        printf "    ↳ %s\n" "$hitg"
+        printf "    ↳ ${YELLOW}%s${RESET}\n" "$hitg"
     done < <(find / -perm -2000 -type f -exec ls -l {} + 2>/dev/null)
 }
 
@@ -1175,8 +1217,39 @@ _ca_suid_scan() {
     printf "├─ Scanning for SUID binaries:\n"
 
     while IFS= read -r hit; do
-        printf "    ↳ %s\n" "$hit"
+        printf "    ↳ ${YELLOW}%s${RESET}\n" "$hit"
     done < <(find / -perm -4000 -type f -exec ls -l {} + 2>/dev/null)
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_find_world_writable_dirs
+# Purpose : Scan for world_writable_dirs
+#------------------------------------------------------------------------
+_ca_find_world_writable_dirs() {
+
+    printf "Scanning for world-writable directories...\n"
+
+    # Find world-writable directories
+    mapfile -t dirs < <(find / -type d -perm -0002 2>/dev/null)
+
+    for dir in "${dirs[@]}"; do
+        [ -d "$dir" ] || continue
+
+        perms=$(stat -c "%A" "$dir")
+        owner_g=$(stat -c "%U:%G" "$dir")
+        note=""
+
+        # Check sticky bit (position 9)
+        sticky="${perms:9:1}"
+
+        if [ "$sticky" = "t" ] || [ "$sticky" = "T" ]; then
+            note="${YELLOW}WORLD-WRITABLE + STICKY${RESET}"
+            printf "    ↳ ${YELLOW}%-40s %-10s %-20s %-25s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+        else
+            note="${RED}WORLD-WRITABLE!${RESET}"
+            printf "    ↳ ${RED}%-40s %-10s %-20s %-25s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+        fi
+    done
 }
 
 #------------------------------------------------------------------------
@@ -1509,6 +1582,32 @@ _ca_sourced_files() {
     done
     printf "\n      End of list\n"
 }        
+
+#------------------------------------------------------------------------
+# Function: _ca_show_shadowing
+# Purpose : Display path shadowing of a command
+#------------------------------------------------------------------------
+_ca_show_shadowing() {
+    local cmd="$1" cmdpath="$2"
+    local shad=() 
+    local dir
+
+    IFS=':' read -ra PATH_ARR <<< "$PATH"
+    for dir in "${PATH_ARR[@]}"; do
+        [[ -x "$dir/$cmd" ]] || continue
+        [[ "$dir/$cmd" == "$cmdpath" ]] && continue
+        shad+=("$dir/$cmd")   
+    done
+
+    (( ${#shad[0]} == 0 )) && return 0
+
+    printf "%s    ↳ Shadowed versions:\n" "$indent"
+
+    local s
+for s in "${shad[@]}"; do
+    printf "%s    │    ${CYAN}%s${RESET}\n" "$indent" "$s"
+done
+}
 
 #------------------------------------------------------------------------
 # End of script
