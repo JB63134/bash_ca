@@ -1,4 +1,4 @@
-# ca — A Buggy (But Ambitious) Bash Command Analyzer
+# ca — A Bash Command Analyzer
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.12-blue)](https://github.com/JB63134/bash_ca/releases) 
