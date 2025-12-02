@@ -1,7 +1,7 @@
 V1.0.19
      added support for batcat highlighting with fallback to perl
      fixed $PATH code for (mode : -p)
-     ui cleanup code cleanup.
+     code cleanup. ui bug fixes.
 
 V1.0.15
      code cleanup. ui bug fixes.
