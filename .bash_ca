@@ -54,7 +54,10 @@ ca() {
         #--------------------------
         # Greeting
         #--------------------------
-        printf "\n├─ ca - a buggy BASH Command Analyzer\n"
+        printf "\n╔══════════════════════════════════════════════╗\n"
+        printf "║  ca – Bash Command Analyzer                  ║\n"
+        printf "╚══════════════════════════════════════════════╝\n"
+
     fi 
     
     # -------------------------
@@ -68,6 +71,8 @@ ca() {
         YELLOW=$(tput setaf 11)
         BPURP=$(tput setaf 13)
         RESET=$(tput sgr0)
+        UNLINE=$(tput smul)
+        STOPUNLINE=$(tput rmul)
     else
         # Fallback: ANSI escape sequences
         RED='\033[31m'
@@ -76,8 +81,10 @@ ca() {
         YELLOW='\033[93m'
         BPURP='\033[95m'
         RESET='\033[0m'
+        UNLINE='\033[4m'
+        STOPUNLINE='\033[0m'
     fi
-        
+  
     # -------------------------
     # Depth guard
     # -------------------------
@@ -431,6 +438,21 @@ ca() {
         local base=$(basename "$cmd_real")
         _ca_show_shadowing "$base" "$cmd_real"
         
+        local size_bytes=$(stat -c %s "$cmd_path")
+        printf "%s    ↳ File Size: " "$indent" 
+
+        local kib=1024
+        local mib=$((1024 * 1024))
+        local gib=$((1024 * 1024 * 1024))
+        local tib=$((1024 * 1024 * 1024 * 1024))
+
+        if   (( size_bytes < kib )); then printf "${CYAN}%d B${RESET}\n" "$size_bytes"
+        elif (( size_bytes < mib )); then printf "${CYAN}%.1f KB${RESET}\n" "$(echo "$size_bytes / 1024" | bc -l)"
+        elif (( size_bytes < gib )); then printf "${CYAN}%.1f MB${RESET}\n" "$(echo "$size_bytes / 1048576" | bc -l)"
+        elif (( size_bytes < tib )); then printf "${CYAN}%.1f GB${RESET}\n" "$(echo "$size_bytes / 1073741824" | bc -l)"
+        else                         printf "${CYAN}%.1f TB${RESET}\n" "$(echo "$size_bytes / 1099511627776" | bc -l)"
+        fi
+        
         # Executable Type
         if grep -qiE 'script|text executable' <<< "$file_info"; then
             printf "%s    ↳ Executable Type: ${CYAN}Script / Text executable${RESET}\n" "$indent"
@@ -588,7 +610,18 @@ ca() {
             printf "%s    ⎟    ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" \
                 "$indent" "$owner_perm" "$group_perm" "$other_perm"
         fi
+       
+        local crtime=$(stat -c %w -- "$cmd_path"); [[ "$crtime" == "-" ]] && crtime="(not available)"
+        local ctime=$(stat -c %z -- "$cmd_path")
+        local mtime=$(stat -c %y -- "$cmd_path")
+        local atime=$(stat -c %x -- "$cmd_path")
         
+        printf "%s    ↳ Timestamps:\n" "$indent"
+        printf "%s    ⎟    ↳ File created (crtime): ${CYAN}%s${RESET}\n" "$indent" "$crtime"
+        printf "%s    ⎟    ↳ Last status change (ctime): ${CYAN}%s${RESET}\n" "$indent" "$ctime" 
+        printf "%s    ⎟    ↳ Last modified (mtime): ${CYAN}%s${RESET}\n" "$indent" "$mtime"   
+        printf "%s    ⎟    ↳ Last accessed (atime): ${CYAN}%s${RESET}\n" "$indent" "$atime"         
+
         local perlfound=0
         if command -v perl &>/dev/null; then
             perlfound=1
@@ -603,7 +636,7 @@ ca() {
             if [[ -r "$cmd_path" ]]; then
                 printf "\n"
                 _ca_highlight_script "$cmd_path" "$indent"
-                printf "\n\n%s    ─── End of script '%s' ───\n" "$indent" "$cmd"
+                printf "\n%s    ======== End of script '%s' ======== \n" "$indent" "$cmd"
             fi
             return 0
         else
@@ -652,7 +685,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.15 — Bash Command Analyzer
+     ca v1.0.19 — Bash Command Analyzer
      Author : John Blair
      Updated: 2025-11-10  
           
@@ -869,19 +902,6 @@ _ca_expand_path() {
 #------------------------------------------------------------------------
 # Function: _ca_highlight_script   # _ca_highlight_script "$path-to-script" "<blankspaces>"
 # Purpose: Modular syntax highlighting with indentation based on string in $2
-#
-#        how to add patterns and colors for highlighting
-#
-#  Example usage: To highlight the word forecast in bright magenta:
-#  HIGHLIGHT_PATTERNS+=('\bforecast\b') # your_regex_here
-#  HIGHLIGHT_COLORS+=('\x1b[95m')   # bright magenta - choose the ANSI color
-#
-#  Make sure that HIGHLIGHT_PATTERNS and HIGHLIGHT_COLORS remain aligned by index 
-#  (pattern i uses color i).
-#
-#  Multiple new entries: 
-#  HIGHLIGHT_PATTERNS+=('\bforecast\b' '\bradar\b') # Highlight 'forecast' and 'radar'
-#  HIGHLIGHT_COLORS+=('\x1b[95m' '\x1b[92m')  # bright magenta & bright green
 #------------------------------------------------------------------------
 _ca_highlight_script() {
     local input="$1"
@@ -894,12 +914,12 @@ _ca_highlight_script() {
     else
         code="$input"
     fi
-
-    # Check if Perl is installed if not use sed
-    if ! command -v perl &>/dev/null; then
-        _ca_sed_highlight
-    fi
     
+    if command -v batcat &>/dev/null && [[ -f "$input" ]]; then
+        batcat --color=always --paging=never "$input" | sed "s/^/$indent/"
+        return
+    fi
+
     perl - "$code" "$indent" <<'PERL_CODE'
 use strict;
 use warnings;
@@ -952,76 +972,13 @@ for my $line (split /\n/, $content) {
 PERL_CODE
 }
 
-    #-----------------------------------------------------------
-    # Helper: _ca_sed_highlight - fallback if perl is unavailable
-_ca_sed_highlight() {
-        local highlighted
-        local use_color=1
-        local esc=$'\x1b'
-
-        # Disable color if stdout is not a terminal
-        [[ ! -t 1 ]] && use_color=0
-
-        # Read content safely
-        if [[ -f "$input" ]]; then
-            highlighted=$(<"$input")
-        else
-            highlighted="$input"
-        fi
-
-            # Highlight patterns
-        declare -a HIGHLIGHT_PATTERNS=(
-            '#.*'                                 # comments
-            '"[^"]*"|'\''[^'\'']*'\'''            # strings
-            '\$\([^)]*\)|`[^`]*`'                 # subshells
-            '\b(local|declare|export|typeset)\b'  # declarations
-            '\b(if|then|else|elif|fi|for|while|do|done|until|select|case|esac|break|continue)\b' # control
-            '\b(function|return|exit|trap|shift|read|mapfile|set|unset)\b' # builtins
-            '\b(printf|echo|mkdir|find|grep|sed|awk|cut|sort|head|tail|xargs|cat|touch|chmod|chown|curl|wget)\b' # commands
-            '\$[A-Za-z0-9_@#*!?_-]+'             # variables
-            '\b[0-9]+(\.[0-9]+)?\b|0x[0-9A-Fa-f]+' # numbers
-            '\[\[|\]\]|\(\(|\)\)|\(|\)|\{|\}'     # brackets/parens/braces
-        )
-
-        declare -a HIGHLIGHT_COLORS=(
-            "${esc}[36m"    # comments — cyan
-            "${esc}[96m"    # strings — bright cyan
-            "${esc}[35m"    # subshells — magenta
-            "${esc}[32m"    # declarations — green
-            "${esc}[93m"    # control — yellow
-            "${esc}[32m"    # builtins — green
-            "${esc}[35m"    # common commands — magenta
-            "${esc}[33m"    # variables — yellow
-            "${esc}[34m"    # numbers — blue
-            "${esc}[37m"    # brackets — gray
-        )
-
-        # Disable colors if needed
-        if (( use_color == 0 )); then
-            for i in "${!HIGHLIGHT_COLORS[@]}"; do
-                HIGHLIGHT_COLORS[$i]=""
-            done
-        fi
-
-        # Apply highlighting patterns
-        for i in "${!HIGHLIGHT_PATTERNS[@]}"; do
-            local pattern="${HIGHLIGHT_PATTERNS[$i]}"
-            local color="${HIGHLIGHT_COLORS[$i]}"
-            highlighted=$(echo "$highlighted" | sed -E "s/($pattern)/${color}\1${esc}[0m/g")
-        done
-
-        # Print with indentation
-        printf "%s\n" "$highlighted" | sed "s/^/$indent    /"
-        return
-}
-
 #------------------------------------------------------------------------
 # Function: _ca_check_dependencies
 # Purpose : Check core and optional dependencies, optionally exit on missing core deps
 # Usage   : _ca_check_dependencies needed_deps optional_deps [EXIT_ON_MISSING] 0or1
 #------------------------------------------------------------------------
 needed_deps=(grep basename file find sed cut head readlink realpath dpkg awk ldd getcap)
-optional_deps=(tput fzf perl)
+optional_deps=(tput fzf perl batcat)
 
 _ca_check_dependencies() {
     local -n required="$1"    # Required dependencies (pass by name)
@@ -1053,11 +1010,14 @@ _ca_check_dependencies() {
 # Purpose : list all commands that override another command
 #------------------------------------------------------------------------
 _ca_overridden() {
+
+    printf "======== Override Inspection (Mode: -o) ========\n\n"
     _ca_alias_override
     printf "\n"  
     _ca_function_override
     printf "\n"  
     _ca_builtin_override
+    printf "\n    ======== End of list ======== \n"
 }
 
 #------------------------------------------------------------------------
@@ -1188,9 +1148,10 @@ _ca_builtin_override() {
 
 #------------------------------------------------------------------------
 # Function: _ca_display_scan
-# Purpose : Display SUID / SGID binaries
+# Purpose : scan for SUID / SGID binaries and World-Writable directories 
 #------------------------------------------------------------------------
 _ca_display_scan() {
+    printf "======== SUID/SGID and World-Writable directories (Mode: -S) ========\n\n"
     _ca_suid_scan
     printf "\n"
     _ca_sgid_scan
@@ -1227,7 +1188,7 @@ _ca_suid_scan() {
 #------------------------------------------------------------------------
 _ca_find_world_writable_dirs() {
 
-    printf "Scanning for world-writable directories...\n"
+    printf "├─ Scanning for World-Writable directories:\n"
 
     # Find world-writable directories
     mapfile -t dirs < <(find / -type d -perm -0002 2>/dev/null)
@@ -1257,21 +1218,11 @@ _ca_find_world_writable_dirs() {
 # Purpose : Detect writable directories in $PATH
 #------------------------------------------------------------------------
 _ca_writable_dir_in_path() {
-    PATH="$OLD_PATH" 
-    printf "├─ Examining PATH:\n"
-    printf "├─ Identifying writable directories:\n"
+_ca_restore_path
+    printf "======== PATH Inspection (Mode: -p) ========\n\n"                          
 
-    # List all writable directories quickly
-    printf "%s\n" ${PATH//:/ } |
-    while read -r d; do
-        [ -d "$d" ] || continue
-        if [ -w "$d" ]; then
-            printf "    ↳ ${YELLOW}Writable directory in PATH: ${CYAN}%s${RESET}\n" "$d"
-        fi
-    done
-
-    printf "\n├─ Examining PATH directory permissions:\n"
-    printf "    ↳ %-40s %-15s %-20s %-10s\n" "Directory" "Perms" "Owner:Group" "Note"
+    printf "├─ Examining PATH directory Order and Permissions:\n"
+    printf "    ↳ ${UNLINE}%-40s %-15s %-20s %-10s${STOPUNLINE}\n" "Directory" "Perms" "Owner:Group" "Note"
     
     IFS=: read -ra dirs <<< "$PATH"
     for dir in "${dirs[@]}"; do
@@ -1279,7 +1230,6 @@ _ca_writable_dir_in_path() {
 
         perms=$(stat -c "%A" "$dir")
         owner_g=$(stat -c "%U:%G" "$dir")
-        
         note=""
 
         # Check if world-writable (other write bit set)
@@ -1293,6 +1243,7 @@ _ca_writable_dir_in_path() {
             printf "    ↳ %-40s %-15s %-20s %-10s\n" "$dir" "$perms" "$owner_g" "$note"
         fi
     done
+        printf "\n    ======== End of list ======== \n"
 }
 
 #------------------------------------------------------------------------
@@ -1574,13 +1525,13 @@ _ca_parse_commands() {
 _ca_sourced_files() {
     local garbage_count=${#garbage[@]}
     _ca_sourcedtree
-    
+    printf "======== Sourced File Inspection (Mode: -s) ========\n\n"
     printf "%s├─ Searching for files that have been sourced into the enviroment automatically\n" 
-    printf "    ↳ Discovered the following files:\n\n" 
+    printf "    ↳ ${UNLINE}Discovered the following files${STOPUNLINE}:\n" 
     for file in "${SOURCED_FILES_LIST[@]}"; do
-        printf "      ${CYAN}%s${RESET}\n" "$file" 
+        printf "    ↳ ${CYAN}%s${RESET}\n" "$file" 
     done
-    printf "\n      End of list\n"
+    printf "\n    ======== End of list ======== \n"
 }        
 
 #------------------------------------------------------------------------
