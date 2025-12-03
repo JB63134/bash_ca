@@ -53,75 +53,44 @@ ca is a shell-command introspection tool that tells you what a command really is
 **Advantages to using ca**
  
 1. Shell introspection
-
 type – identify if a command is a builtin, alias, function, or external command
-
 command -V / command -v – get command resolution info
-
 alias – show alias definitions
-
 declare -f – show function definitions
-
 builtin – check if a command is a shell builtin
-
 hash – detect overridden commands
-
 ca advantage: Shows aliases, functions, builtins, and external commands together, including nested aliases/functions and depth-limited recursion.
 
 2. Binary / script inspection
-
 which – locate binaries in $PATH
-
 file – detect file type (script, ELF binary, etc.)
-
 readlink -f / realpath – canonical path resolution and symlink chains
-
 stat -c – permissions, ownership, timestamps
-
 getcap – POSIX capabilities on binaries
-
 ldd – list dynamic library dependencies
-
 ca advantage: Combines path resolution, ELF info, permissions, symlinks, capabilities, and dependencies in one view, which usually requires 5+ commands.
 
 3. Package / system info
-
 dpkg -S / dpkg -s (Debian) – find which package a file belongs to and its info
-
 ca advantage: Displays package info alongside binary metadata without switching tools.
 
 4. Script / function source
-
 head -n 1 – quickly see shebang
-
 cat / less – inspect script contents
-
 declare -f – function bodies
-
 ca advantage: Shows full source with line numbers, including alias and function definitions, plus optional syntax highlighting.
 
 5. Security / audit checks
-
 find -perm / ls -l – search for SUID/SGID or world-writable files
-
 echo $PATH + manual inspection – check writable dirs in $PATH
-
 hash / type – detect overridden commands
-
 ca advantage: Automates SUID/SGID world-writable search, writable $PATH directories, and overridden command detection, which normally requires multiple commands and scripting.
 
 ✅ Summary
-
 ca realistically replaces or consolidates the following categories of commands:
-
 Shell introspection: type, command -v, alias, declare -f, builtin, hash
-
 Binary/script inspection: which, file, readlink -f, realpath, stat -c, getcap, ldd
-
 Package info: dpkg
-
 Script/function source: head, cat, declare -f
-
 Security auditing: find -perm, ls -l, $PATH checks, hash
-
 In short: ca is a single, unified replacement for 15–20 commands, giving developers and sysadmins a much faster, one-command inspection tool.
