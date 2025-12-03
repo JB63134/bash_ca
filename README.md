@@ -64,7 +64,7 @@ ca advantage: Shows aliases, functions, builtins, and external commands together
 2. Binary / script inspection  
 `which` – locate binaries in $PATH  
 `file` – detect file type (script, ELF binary, etc.)  
-`readlink` / realpath – canonical path resolution and symlink chains  
+`readlink` / `realpath` – canonical path resolution and symlink chains  
 `stat` – permissions, ownership, timestamps  
 `getcap` – POSIX capabilities on binaries  
 `ldd` – list dynamic library dependencies  
