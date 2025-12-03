@@ -49,6 +49,22 @@ ca is a shell-command introspection tool that tells you what a command really is
 
 💡 Tips Use ca when a command behaves unexpectedly. Use it to debug PATH issues or command conflicts. Use it when aliases or functions override global tools. Use it to audit your environment for security problems Or simply use it to explore Bash internals
 
+| Feature / Tool                                 | `ca` | `type`  | `command -V` | `which` | `declare -f` | `file`               | `stat -c`        | `getcap` | `ldd` | `dpkg` | `readlink` | `realpath` |
+| ---------------------------------------------- | ---- | ------- | ------------ | ------- | ------------ | -------------------- | ---------------- | -------- | ----- | ------ | ---------- | ---------- |
+| Identify alias/function/builtin                | ✔    | ✔       | ✔            | ✖       | limited      | ✖                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Show alias definition                          | ✔    | partial | partial      | ✖       | ✖            | ✖                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Show function body                             | ✔    | ✖       | ✖            | ✖       | ✔            | ✖                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Resolve nested aliases/functions               | ✔    | ✖       | ✖            | ✖       | ✖            | ✖                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Show binary path & symlink chain               | ✔    | ✔       | ✔            | ✔       | ✖            | ✖                    | partial (inode)  | ✖        | ✖     | ✖      | ✔          | ✔          |
+| Show script interpreter                        | ✔    | ✖       | ✖            | ✖       | ✖            | ✔                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Show ELF architecture / interpreter / BuildID  | ✔    | ✖       | ✖            | ✖       | ✖            | ✔ (basic magic only) | ✖                | ✖        | ✔     | ✖      | ✖          | ✖          |
+| Show package info (Debian)                     | ✔    | ✖       | ✖            | ✖       | ✖            | ✖                    | ✖                | ✖        | ✖     | ✔      | ✖          | ✖          |
+| Show permissions / ownership / timestamps      | ✔    | ✖       | ✖            | ✖       | ✖            | ✖                    | ✔ (all metadata) | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Show file capabilities (POSIX caps)            | ✔    | ✖       | ✖            | ✖       | ✖            | ✖                    | ✖                | ✔        | ✖     | ✖      | ✖          | ✖          |
+| Show script or function source w/ line numbers | ✔    | ✖       | ✖            | ✖       | partial      | ✖                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Show alias source w/ line numbers              | ✔    | ✖       | ✖            | ✖       | ✖            | ✖                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Depth-limited recursion                        | ✔    | ✖       | ✖            | ✖       | ✖            | ✖                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
+| Identify missing dependencies                  | ✔    | ✖       | ✖            | ✖       | ✖            | ✖                    | ✖                | ✖        | ✔     | ✖      | ✖          | ✖          |
 
 
 | Feature / Scope                | `h` (Bash help)                          | `ca` (Command Analyzer)                                                                |
