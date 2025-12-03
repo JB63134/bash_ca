@@ -49,6 +49,8 @@ ca is a shell-command introspection tool that tells you what a command really is
 
 💡 Tips Use ca when a command behaves unexpectedly. Use it to debug PATH issues or command conflicts. Use it when aliases or functions override global tools. Use it to audit your environment for security problems Or simply use it to explore Bash internals
 
+**Feature Comparison Table**
+
 | Feature / Tool                                 | `ca` | `type`  | `command -V` | `which` | `declare -f` | `file`               | `stat -c`        | `getcap` | `ldd` | `dpkg` | `readlink` | `realpath` |
 | ---------------------------------------------- | ---- | ------- | ------------ | ------- | ------------ | -------------------- | ---------------- | -------- | ----- | ------ | ---------- | ---------- |
 | Identify alias/function/builtin                | ✔    | ✔       | ✔            | ✖       | limited      | ✖                    | ✖                | ✖        | ✖     | ✖      | ✖          | ✖          |
@@ -67,15 +69,3 @@ ca is a shell-command introspection tool that tells you what a command really is
 | Identify missing dependencies                  | ✔    | ✖       | ✖            | ✖       | ✖            | ✖                    | ✖                | ✖        | ✔     | ✖      | ✖          | ✖          |
 
 
-| Feature / Scope                | `h` (Bash help)                          | `ca` (Command Analyzer)                                                                |
-| ------------------------------ | ---------------------------------------- | -------------------------------------------------------------------------------------- |
-| **Type detection**             | ✅ Keywords, builtins, aliases, functions | ✅ Keywords, builtins, aliases, functions                                               |
-| **External commands**          | Path + --help, man, info alert            | ✅ Path, symbolic links, binary type, ELF headers, dependencies, permissions             |
-| **Scripts / Functions**        | ✅ Shows content with syntax highlighting | ✅ Shows content with syntax highlighting                                               |
-| **Permissions / Ownership**    | ❌                                        | ✅ Includes SUID/SGID, owner/group, octal permissions                                   |
-| **Shadow / Overrides**         | ❌                                        | ✅ Detects overridden commands, shadowing                                               |
-| **Dependencies / Environment** | ❌                                        | ✅ Checks missing deps, sourced files hierarchy                                         |
-| **Package info**               | ❌                                        | ✅ Version, maintainer, description                                                     |
-| **Interactive search**         | ✅ fzf                                    | ✅ fzf                                                                                  |
-| **Ease of use**                | ✅ Tab Completion                         | ✅ Tab Completion                                                                       |
-| **Focus / Use case**           | Shell-level explanation                  | Deep system/binary inspection                                                          |
