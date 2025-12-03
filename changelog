@@ -1,3 +1,6 @@
+V1.0.25
+     code cleanup. -- passed shellcheck
+
 V1.0.19
      added support for batcat highlighting with fallback to perl
      fixed $PATH code for (mode : -p)
