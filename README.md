@@ -52,16 +52,16 @@ ca is a shell-command introspection tool that tells you what a command really is
 
 **Advantages to using ca**
  
-1. Shell introspection
-`type` – identify if a command is a builtin, alias, function, or external command
-`command` – get command resolution info
-`alias `– show alias definitions
-`declare` – show function definitions
-`builtin` – check if a command is a shell builtin
-`hash` – detect overridden commands
+1. Shell introspection  
+`type` – identify if a command is a builtin, alias, function, or external command  
+`command` – get command resolution info  
+`alias `– show alias definitions  
+`declare` – show function definitions  
+`builtin` – check if a command is a shell builtin  
+`hash` – detect overridden commands  
 ca advantage: Shows aliases, functions, builtins, and external commands together, including nested aliases/functions and depth-limited recursion.
 
-2. Binary / script inspection
+2. Binary / script inspection  
 `which` – locate binaries in $PATH  
 `file` – detect file type (script, ELF binary, etc.)  
 `readlink` / realpath – canonical path resolution and symlink chains  
@@ -70,17 +70,17 @@ ca advantage: Shows aliases, functions, builtins, and external commands together
 `ldd` – list dynamic library dependencies  
 ca advantage: Combines path resolution, ELF info, permissions, symlinks, capabilities, and dependencies in one view, which usually requires 5+ commands.  
 
-3. Package / system info
+3. Package / system info  
 `dpkg` (Debian based distributions) – find which package a file belongs to and its info  
 ca advantage: Displays package info alongside binary metadata without switching tools.  
 
-4. Script / function source
+4. Script / function source  
 `head` – quickly see shebang  
 `cat` / `less` – inspect script contents  
 `declare` – function bodies  
 ca advantage: Shows full source with line numbers, including alias and function definitions, plus optional syntax highlighting.
 
-5. Security / audit checks
+5. Security / audit checks  
 `find` `ls` – search for SUID/SGID or world-writable files  
 `echo $PATH` + manual inspection – check writable dirs in $PATH  
 `hash` / `type` – detect overridden commands  
