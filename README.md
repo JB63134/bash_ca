@@ -49,6 +49,7 @@ ca is a shell-command introspection tool that tells you what a command really is
 
 💡 Tips Use ca when a command behaves unexpectedly. Use it to debug PATH issues or command conflicts. Use it when aliases or functions override global tools. Use it to audit your environment for security problems Or simply use it to explore Bash internals
 
+
 **Feature Comparison Table**
 
 | Feature / Tool                                 | `ca` | `type`  | `command -V` | `which` | `declare -f` | `file`               | `stat -c`        | `getcap` | `ldd` | `dpkg` | `readlink` | `realpath` |
