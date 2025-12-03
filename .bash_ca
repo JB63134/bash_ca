@@ -10,14 +10,18 @@ case $- in
       *) return;;
 esac
 
+# shellcheck disable=SC2034
+ca_needed_deps=(grep basename file find sed cut head readlink realpath dpkg awk ldd getcap perl)
+# shellcheck disable=SC2034
+ca_optional_deps=(tput fzf batcat bat)
+
 OLD_PATH="$PATH"
 
 declare -gA __CA_SEEN_ALIASES
 declare -gA __CA_SEEN_COMMANDS
 declare -gA __CA_SEEN_BUILTINS
 declare -gA __CA_SHADOW_SEEN
-declare -gA __CA_VISITED        
-declare -g suppress_builtin_msg=1    
+declare -gA __CA_VISITED          
 complete -F _ca_completion ca
 
 ca() {
@@ -28,40 +32,11 @@ ca() {
     local depth=${2:-0}
     local cmdline="$*"
     local MAX_DEPTH=8
-    local indent=$(printf "%*s" $((depth * 4)) "")
+    local indent
+    indent=$(printf "%*s" $((depth * 4)) "")
     
     # -------------------------
-    # Set first run variables path etc... keep from running every recursive loop 
-    # set new path, clean arrays, and greet user once
-    # -------------------------
-    if (( depth == 0 )); then
-        trap '_ca_restore_path' RETURN
-        _ca_add_admin_paths
-   
-        # -------------------------
-        # Check dependencies
-        _ca_check_dependencies needed_deps optional_deps 1  # 1 = exit if required deps missing
-
-        #--------------------------
-        # Reset arrays on first run
-        #--------------------------
-        __CA_SEEN_ALIASES=()
-        __CA_SEEN_COMMANDS=()
-        __CA_SEEN_BUILTINS=()
-        __CA_SHADOW_SEEN=()
-        __CA_VISITED=()
-   
-        #--------------------------
-        # Greeting
-        #--------------------------
-        printf "\n╔══════════════════════════════════════════════╗\n"
-        printf "║  ca – Bash Command Analyzer                  ║\n"
-        printf "╚══════════════════════════════════════════════╝\n"
-
-    fi 
-    
-    # -------------------------
-    # Colors (tput → ANSI)
+    # Colors (tput → ANSI → none)
     # -------------------------
     if command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null) -ge 8 ]]; then
         # Preferred: tput colors
@@ -84,7 +59,45 @@ ca() {
         UNLINE='\033[4m'
         STOPUNLINE='\033[0m'
     fi
-  
+ 
+    : "${RED:=}"
+    : "${GREEN:=}"
+    : "${CYAN:=}"
+    : "${YELLOW:=}"
+    : "${BPURP:=}"
+    : "${RESET:=}"
+    : "${UNLINE:=}"
+    : "${STOPUNLINE:=}"
+ 
+    # -------------------------
+    # Set first run variables path etc... keep from running every recursive loop 
+    # set new path, clean arrays, and greet user once
+    # -------------------------
+    if (( depth == 0 )); then
+        trap '_ca_restore_path' RETURN
+        _ca_add_admin_paths
+        # -------------------------
+        # Check dependencies
+        _ca_check_dependencies ca_needed_deps ca_optional_deps 1  # 1 = exit if required deps missing
+
+        #--------------------------
+        # Reset arrays on first run
+        #--------------------------
+        __CA_SEEN_ALIASES=()
+        __CA_SEEN_COMMANDS=()
+        __CA_SEEN_BUILTINS=()
+        __CA_SHADOW_SEEN=()
+        __CA_VISITED=()
+   
+        #--------------------------
+        # Greeting
+        #--------------------------
+        printf "\n╔══════════════════════════════════════════════╗\n"
+        printf "║  ca – Bash Command Analyzer                  ║\n"
+        printf "╚══════════════════════════════════════════════╝\n"
+
+    fi 
+    
     # -------------------------
     # Depth guard
     # -------------------------
@@ -192,14 +205,21 @@ ca() {
     # -------------------------------------------------------------------------
     if [[ "$ctype" == "keyword" ]]; then
         case "$cmd" in
-        if|case|for|select|while|until|function|time|{|[[|coproc)
+        if|case|for|select|while|until|function|time|[[|coproc)
             printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
             help "$cmd" 2>/dev/null | sed 's/^/    /'
             return 0
             ;;
         esac
-    
+        
+        if [[ "$cmd" == "{" ]]; then
+            printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
+            printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
+            help "$cmd" 2>/dev/null | sed 's/^/    /'
+            return 0
+        fi
+        
         case "$cmd" in
             then|else|elif|fi|do|done|in|!|])
                 description=""
@@ -298,7 +318,6 @@ ca() {
         if (( ${#nextcmd[@]} > 0 )); then
             ca "${nextcmd[*]}" $((depth + 1))
         fi
-
         return 0
     fi
         
@@ -310,18 +329,32 @@ ca() {
         #--------------------------- 
         # Enable extdebug temporarily so declare -F includes file/line info
         local was_extdebug=0
-        shopt -q extdebug && was_extdebug=1 || shopt -s extdebug
+
+        if shopt -q extdebug; then
+            was_extdebug=1
+        else
+            shopt -s extdebug
+        fi
         
-        read _ line file <<< "$(declare -F "$cmd")"
+        read -r _ line file <<< "$(declare -F "$cmd")"
 
         (( !was_extdebug )) && shopt -u extdebug  # Restore extdebug state if we enabled it
         #---------------------------- 
         
-        printf "%s├─ ${CYAN}'%s' ${RESET}is a shell function\n" "$indent" "$cmd"
-        printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$file" "$line"
-        printf "%s    ↳ Showing function: ${CYAN}%s${RESET}\n\n"  "$indent" "$cmd"        
-        local func_content=$(declare -f "$cmd")
-        _ca_highlight_script "$func_content" "$indent"
+        printf "%s├─ ${CYAN}'%q' ${RESET}is a shell function\n" "$indent" "$cmd"
+        
+        if [[ "$file" == "main" ]]; then
+            printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$indent"
+        else
+            printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$file" "$line"
+        fi
+        
+        printf "%s    ↳ Showing function: ${CYAN}%s${RESET}\n\n"  "$indent" "$cmd"     
+           
+        local func_content
+        func_content=$(declare -f "$cmd")
+        _h_highlight_script "$func_content" "$indent"
+        
         printf "\n%s    ─── End of function '%s' ───\n" "$indent" "$cmd"    
         return 0
     fi
@@ -335,14 +368,14 @@ ca() {
         __CA_SEEN_ALIASES["$cmd"]=1
     
         # Get the alias expansion (strip surrounding quotes)
+        local raw
         raw=$(alias "$cmd")
         alias_expansion=${raw#*=}         # remove 'name='
         alias_expansion=${alias_expansion:1:${#alias_expansion}-2}   # trim outer quotes
-
         # Expand environment vars safely (no command execution)
         alias_expansion=$(_ca_expand_vars "$alias_expansion")
-  
         alias_def=$(alias "$cmd")
+        
         printf "%s├─ ${CYAN}'%s' ${RESET}is an alias → resolves to: ${CYAN}%s${RESET}\n" "$indent" "$cmd" "$alias_def"
     
         # Show where alias is defined
@@ -354,8 +387,13 @@ ca() {
         #-----------------------------------------------------
         # Enable nullglob temporarily 
         local nullglob_was=0
-        shopt -q nullglob && nullglob_was=1 || shopt -s nullglob      
-        for file in ${SOURCED_FILES_LIST[@]}; do 
+        if shopt -q nullglob; then
+            nullglob_was=1
+        else
+            shopt -s nullglob
+        fi
+           
+        for file in "${SOURCED_FILES_LIST[@]}"; do 
              [[ -r "$file" ]] || continue
              if grep -qE "^[[:space:]]*alias[[:space:]]+${cmd}=" "$file"; then
                 found_location="$file"
@@ -435,10 +473,12 @@ ca() {
             printf "%s    ↳ Now Examining: ${BPURP}%s${RESET}\n" "$indent" "$cmd_real"
         fi
         
-        local base=$(basename "$cmd_real")
+        local base
+        base=$(basename "$cmd_real")
         _ca_show_shadowing "$base" "$cmd_real"
         
-        local size_bytes=$(stat -c %s "$cmd_path")
+        local size_bytes
+        size_bytes=$(stat -c %s "$cmd_path")
         printf "%s    ↳ File Size: " "$indent" 
 
         local kib=1024
@@ -611,10 +651,12 @@ ca() {
                 "$indent" "$owner_perm" "$group_perm" "$other_perm"
         fi
        
-        local crtime=$(stat -c %w -- "$cmd_path"); [[ "$crtime" == "-" ]] && crtime="(not available)"
-        local ctime=$(stat -c %z -- "$cmd_path")
-        local mtime=$(stat -c %y -- "$cmd_path")
-        local atime=$(stat -c %x -- "$cmd_path")
+        local crtime ctime mtime atime
+        
+        crtime=$(stat -c %w -- "$cmd_path"); [[ "$crtime" == "-" ]] && crtime="(not available)"
+        ctime=$(stat -c %z -- "$cmd_path")
+        mtime=$(stat -c %y -- "$cmd_path")
+        atime=$(stat -c %x -- "$cmd_path")
         
         printf "%s    ↳ Timestamps:\n" "$indent"
         printf "%s    ⎟    ↳ File created (crtime): ${CYAN}%s${RESET}\n" "$indent" "$crtime"
@@ -685,7 +727,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.19 — Bash Command Analyzer
+     ca v1.0.25 — Bash Command Analyzer
      Author : John Blair
      Updated: 2025-11-10  
           
@@ -783,7 +825,6 @@ _ca_completion() {
     
     # Collect possible completions: aliases, functions, builtins, and executables in PATH
     mapfile -t commands < <(compgen -A function -A alias -A builtin -A command -- "$cur")
-
     # Provide them to bash-completion
     COMPREPLY=("${commands[@]}")
 }
@@ -808,7 +849,6 @@ _ca_expand_vars() {
 # Function: _ca_sourcedtree
 # Purpose: Recursively scan .bashrc for ALL files that are sourced. including conditionals.
 #------------------------------------------------------------------------
-# Global array to track all sourced files
 declare -gA SOURCED_FILES_MAP=()   # associative array to avoid duplicates
 declare -ga SOURCED_FILES_LIST=()  # optional list preserving order
 
@@ -818,8 +858,7 @@ _ca_sourcedtree() {
     local file files depth max_depth
     depth=0
     max_depth="${MAX_DEPTH:-5}"
-    
-    files=($BASH_ENV) 
+    files=("$BASH_ENV")
 
 if shopt -q login_shell; then
     [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
@@ -915,8 +954,11 @@ _ca_highlight_script() {
         code="$input"
     fi
     
-    if command -v batcat &>/dev/null && [[ -f "$input" ]]; then
-        batcat --color=always --paging=never "$input" | sed "s/^/$indent/"
+    [[ $(which "bat") ]] && bat_pager="bat"
+    [[ $(which "batcat") ]] && bat_pager="batcat"
+ 
+    if command -v "$bat_pager" &>/dev/null && [[ -f "$input" ]]; then
+        $bat_pager --color=always --paging=never "$input" | sed "s/^/$indent/"
         return
     fi
 
@@ -977,9 +1019,6 @@ PERL_CODE
 # Purpose : Check core and optional dependencies, optionally exit on missing core deps
 # Usage   : _ca_check_dependencies needed_deps optional_deps [EXIT_ON_MISSING] 0or1
 #------------------------------------------------------------------------
-needed_deps=(grep basename file find sed cut head readlink realpath dpkg awk ldd getcap)
-optional_deps=(tput fzf perl batcat)
-
 _ca_check_dependencies() {
     local -n required="$1"    # Required dependencies (pass by name)
     local -n optional="$2"    # Optional dependencies (pass by name)
@@ -1001,8 +1040,14 @@ _ca_check_dependencies() {
     # Report missing required deps
     if (( ${#missing_required[@]} )); then
         printf "${RED}Warning: Missing REQUIRED tools: %s${RESET}\n" "${missing_required[*]}"
-        (( exit_on_missing )) && { printf "Exiting due to missing core dependencies.\n"; exit 1; }
+        if (( exit_on_missing )); then
+            printf "%b\n" "${RED}Cannot continue analysis without core dependencies.${RESET}"
+            # Gracefully stop further execution
+            [[ "${BASH_SOURCE[0]}" == "$0" ]] && exit 1 || return 1
+        fi
     fi
+
+    return 0
 }
 
 #------------------------------------------------------------------------
@@ -1010,14 +1055,13 @@ _ca_check_dependencies() {
 # Purpose : list all commands that override another command
 #------------------------------------------------------------------------
 _ca_overridden() {
-
     printf "======== Override Inspection (Mode: -o) ========\n\n"
     _ca_alias_override
     printf "\n"  
     _ca_function_override
     printf "\n"  
     _ca_builtin_override
-    printf "\n    ======== End of list ======== \n"
+    printf "\n================ End of list =================== \n"
 }
 
 #------------------------------------------------------------------------
@@ -1138,7 +1182,8 @@ _ca_builtin_override() {
 
         # 3. External command replacement?
         if command -v "$name" &>/dev/null; then
-            local newpath=$(command -v "$name")
+            local newpath
+            newpath=$(command -v "$name")
             printf "%s       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$newpath"
         else
             printf "%s       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$indent" "$name"
@@ -1151,12 +1196,13 @@ _ca_builtin_override() {
 # Purpose : scan for SUID / SGID binaries and World-Writable directories 
 #------------------------------------------------------------------------
 _ca_display_scan() {
-    printf "======== SUID/SGID and World-Writable directories (Mode: -S) ========\n\n"
+    printf "=== SUID/SGID and W-W directories (Mode: -S) ===\n\n"
     _ca_suid_scan
     printf "\n"
     _ca_sgid_scan
     printf "\n"
     _ca_find_world_writable_dirs
+    printf "\n================ End of list =================== \n"
 }
 #------------------------------------------------------------------------
 # Function: _ca_sgid_scan
@@ -1219,10 +1265,11 @@ _ca_find_world_writable_dirs() {
 #------------------------------------------------------------------------
 _ca_writable_dir_in_path() {
 _ca_restore_path
-    printf "======== PATH Inspection (Mode: -p) ========\n\n"                          
-
+    printf "========== PATH Inspection (Mode: -p) ==========\n\n"                          
     printf "├─ Examining PATH directory Order and Permissions:\n"
-    printf "    ↳ ${UNLINE}%-40s %-15s %-20s %-10s${STOPUNLINE}\n" "Directory" "Perms" "Owner:Group" "Note"
+    printf "    ↳ %s%-40s %-15s %-20s %-10s%s\n" "$UNLINE" "Directory" "Perms" "Owner:Group" "Note" "$STOPUNLINE"
+
+#    printf "    ↳ ${UNLINE}%-40s %-15s %-20s %-10s${STOPUNLINE}\n" "Directory" "Perms" "Owner:Group" "Note"
     
     IFS=: read -ra dirs <<< "$PATH"
     for dir in "${dirs[@]}"; do
@@ -1243,7 +1290,7 @@ _ca_restore_path
             printf "    ↳ %-40s %-15s %-20s %-10s\n" "$dir" "$perms" "$owner_g" "$note"
         fi
     done
-        printf "\n    ======== End of list ======== \n"
+    printf "\n================ End of list =================== \n"
 }
 
 #------------------------------------------------------------------------
@@ -1280,7 +1327,7 @@ _ca_split_top_level_commands() {
         if (( in_double )); then
             seg+="$c"
             # handle escaped quotes inside double quotes
-            if [[ $c == '"' ]] && [[ "${input:i-1:1}" != '\' ]]; then
+            if [[ $c == '"' ]] && [[ "${input:i-1:1}" != "\\" ]]; then
                 in_double=0
             fi
             ((i++)); continue
@@ -1387,7 +1434,7 @@ _ca_parse_commands() {
         fi
         if (( in_double )); then
             seg+="$c"
-            if [[ $c == '"' && "${cmdline:i-1:1}" != '\' ]]; then
+            if [[ $c == '"' && "${cmdline:i-1:1}" != "\\" ]]; then
                 in_double=0
             fi
             ((i++)); continue
@@ -1468,7 +1515,7 @@ _ca_parse_commands() {
             fi
             if (( in_d )); then
                 token+="$ch"
-                if [[ $ch == '"' && "${raw:j-1:1}" != '\' ]]; then
+                if [[ $ch == '"' && "${raw:j-1:1}" != "\\" ]]; then
                     in_d=0
                 fi
                 ((j++)); continue
@@ -1495,7 +1542,6 @@ _ca_parse_commands() {
         if [[ "$cmd_name" =~ ^\".*\"$ || "$cmd_name" =~ ^\'.*\'$ ]]; then
             cmd_name="${cmd_name:1:${#cmd_name}-2}"
         fi
-        local args=("${tokens[@]:1}")
 
         # Skip already seen alias recursion in this parse (avoid infinite)
         if [[ -n "${__CA_SEEN_ALIASES[$cmd_name]}" ]]; then
@@ -1505,8 +1551,6 @@ _ca_parse_commands() {
 
         if alias "$cmd_name" &>/dev/null; then
             __CA_SEEN_ALIASES[$cmd_name]=1
-            local expansion
-            expansion=$(alias "$cmd_name" | sed -E "s/^alias $cmd_name='(.*)'$/\1/")
             out_arr+=("$cmd_name")
             # we do not expand inline here — return token to caller for further analysis
         elif declare -f "$cmd_name" &>/dev/null; then
@@ -1523,15 +1567,15 @@ _ca_parse_commands() {
 # Purpose: display ALL files that are sourced.
 #------------------------------------------------------------------------
 _ca_sourced_files() {
-    local garbage_count=${#garbage[@]}
     _ca_sourcedtree
-    printf "======== Sourced File Inspection (Mode: -s) ========\n\n"
-    printf "%s├─ Searching for files that have been sourced into the enviroment automatically\n" 
-    printf "    ↳ ${UNLINE}Discovered the following files${STOPUNLINE}:\n" 
+    printf "====== Sourced File Inspection (Mode: -s) ======\n\n"
+    printf "├─ Searching for files that have been sourced into the enviroment automatically\n" 
+    printf "    ↳ %sDiscovered the following files%s:\n" "$UNLINE" "$STOPUNLINE"
+
     for file in "${SOURCED_FILES_LIST[@]}"; do
         printf "    ↳ ${CYAN}%s${RESET}\n" "$file" 
     done
-    printf "\n    ======== End of list ======== \n"
+    printf "\n================ End of list =================== \n"
 }        
 
 #------------------------------------------------------------------------
