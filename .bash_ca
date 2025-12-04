@@ -11,9 +11,9 @@ case $- in
 esac
 
 # shellcheck disable=SC2034
-ca_needed_deps=(grep basename file find sed cut head readlink realpath dpkg awk ldd getcap perl)
+ca_needed_deps=(grep basename file find sed cut head readlink realpath dpkg awk ldd getcap perl 62622)
 # shellcheck disable=SC2034
-ca_optional_deps=(tput fzf batcat bat)
+ca_optional_deps=(tput fzf batcat bat 62626)
 
 OLD_PATH="$PATH"
 
@@ -353,9 +353,9 @@ ca() {
            
         local func_content
         func_content=$(declare -f "$cmd")
-        _h_highlight_script "$func_content" "$indent"
-        
-        printf "\n%s    ─── End of function '%s' ───\n" "$indent" "$cmd"    
+        _ca_highlight_script "$func_content" "$indent"
+
+        printf "\n%s    ======== End of function '%s' =========\n" "$indent" "$cmd"    
         return 0
     fi
     
@@ -405,7 +405,7 @@ ca() {
         #-----------------------------------------------------
         
         if [[ -z "$found_location" ]]; then
-            printf "%s    ↳ Defined manually in shell, or a custom location.\n" "$indent"
+            printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$indent"
         fi     
     
         # Handle alias expansion with chain/pipeline parsing
@@ -671,14 +671,14 @@ ca() {
     
         # Dump script content
         if grep -qiE 'script|text executable' <<< "$file_info"; then
-            printf "%s    ↳ Showing script ${CYAN}'%s'${RESET}:\n" "$indent" "$cmd"
+            printf "%s    ↳ Showing first 50 lines of script ${CYAN}'%s'${RESET}:\n" "$indent" "$cmd"
             if (( perlfound == 0 )); then 
                 printf "%s    ↳ ${YELLOW}Optional dependency 'perl' missing — syntax highlighting reduced${RESET}\n" "$indent" 
             fi           
             if [[ -r "$cmd_path" ]]; then
                 printf "\n"
                 _ca_highlight_script "$cmd_path" "$indent"
-                printf "\n%s    ======== End of script '%s' ======== \n" "$indent" "$cmd"
+                printf "\n%s    ========== End of script preview ========= \n" "$indent"
             fi
             return 0
         else
@@ -727,7 +727,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.25 — Bash Command Analyzer
+     ca v1.0.27 — Bash Command Analyzer
      Author : John Blair
      Updated: 2025-11-10  
           
@@ -953,21 +953,26 @@ _ca_highlight_script() {
     else
         code="$input"
     fi
-    
+
+    #----------------------------------------
+    # From u/Atomfried_Ungemach nice idea to make life simple
     [[ $(which "bat") ]] && bat_pager="bat"
     [[ $(which "batcat") ]] && bat_pager="batcat"
- 
+    #----------------------------------------
     if command -v "$bat_pager" &>/dev/null && [[ -f "$input" ]]; then
-        $bat_pager --color=always --paging=never "$input" | sed "s/^/$indent/"
+        $bat_pager --color=always --paging=never --line-range :50 "$input" | sed "s/^/$indent/"
         return
     fi
 
-    perl - "$code" "$indent" <<'PERL_CODE'
+    perl - "$input" "$indent" <<'PERL_CODE'
 use strict;
 use warnings;
 
 my $content = $ARGV[0];
 my $indent = $ARGV[1] // "";
+my $max    = 50;
+
+open my $fh, "<", $content;
 
 # ANSI colors
 my %C = (
@@ -1007,9 +1012,10 @@ sub highlight {
     }
     return $indent . $line;
 }
-
-for my $line (split /\n/, $content) {
-    print highlight($line, $indent), "\n";
+my $count = 0;
+while (my $line = <$fh>) {
+    last if $count++ >= $max;
+    print highlight($line, $indent);
 }
 PERL_CODE
 }
@@ -1043,10 +1049,9 @@ _ca_check_dependencies() {
         if (( exit_on_missing )); then
             printf "%b\n" "${RED}Cannot continue analysis without core dependencies.${RESET}"
             # Gracefully stop further execution
-            [[ "${BASH_SOURCE[0]}" == "$0" ]] && exit 1 || return 1
+            [[ "${BASH_SOURCE[0]}" == "$0" ]] && return 1 || return 1
         fi
     fi
-
     return 0
 }
 
