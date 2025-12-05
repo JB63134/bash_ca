@@ -3,7 +3,7 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.30-blue)](https://github.com/JB63134/bash_ca/releases) 
 
-ca is very BASH specific. Dpkg supported on Debian based distributions.  Experimental support has been added for additional package managers - RPM and PACMAN.
+ca is very BASH specific. Dpkg supported on Debian based distributions.  Experimental support has been added for additional package managers - RPM, PACMAN and nix.
   
 The command resolution engine from my h function became the basis for ca.  
 ca is a shell-command introspection tool that tells you what a command really is.   Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
@@ -48,3 +48,5 @@ ca is a shell-command introspection tool that tells you what a command really is
      ca !42 
 
 💡 Tips Use ca when a command behaves unexpectedly. Use it to debug PATH issues or command conflicts. Use it when aliases or functions override global tools. Use it to audit your environment for security problems Or simply use it to explore Bash internals
+
+opensuse - need to install libcap-progs
