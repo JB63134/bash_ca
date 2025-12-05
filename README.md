@@ -32,7 +32,8 @@ ca is a shell-command introspection tool that tells you what a command really is
 
 📦 Package Lookup On Debian/Ubuntu/linux-Mint systems: uses dpkg to display the package name, version,  maintainer info, and package description. Experimental support has been added for RPM and PACMAN.
 
-🛠️ Installation: Source .bash_ca
+🛠️ Installation: Source .bash_ca    
+opensuse - need to install libcap-progs.
  
 🛠️ Usage Basic: 
 
