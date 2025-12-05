@@ -11,9 +11,9 @@ case $- in
 esac
 
 # shellcheck disable=SC2034
-ca_needed_deps=(grep basename file find sed cut head readlink realpath dpkg awk ldd getcap perl)
+ca_needed_deps=(grep basename file find sed cut head readlink realpath awk ldd getcap perl)
 # shellcheck disable=SC2034
-ca_optional_deps=(tput fzf batcat)
+ca_optional_deps=(tput fzf batcat bat dpkg rpm pacman)
 
 OLD_PATH="$PATH"
 
@@ -587,22 +587,9 @@ ca() {
             (( unmet_found )) && printf "%s        ↳ ${RED}Some dependencies are missing!${RESET}\n" "$indent"
         fi
 
-        # Package info
-        if command -v dpkg &>/dev/null; then
-            local pkg_name pkg_lines=()
-            pkg_name=$(dpkg -S "$cmd_path" 2>/dev/null | cut -d: -f1 | head -n1)
-
-            if [[ -n "$pkg_name" ]]; then
-                while IFS= read -r line; do pkg_lines+=("$line"); done \
-                    < <(dpkg-query -W -f='${Package}\n${Version}\n${Maintainer}\n${Description}\n'  "$pkg_name" 2>/dev/null)
-
-                printf "%s    ↳ Package Info:\n" "$indent"
-                printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[0]}"
-                printf "%s    ⎟    Version: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[1]}"
-                printf "%s    ⎟    Maintainer: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[2]}"
-                printf "%s    ⎟    Description: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[3]}"
-            fi
-        fi
+# Package info
+_ca_lookup_package "$cmd_path" "$indent"
+        
 
         # Permissions
         if [[ -x "$cmd_path" ]]; then
@@ -727,7 +714,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.28 — Bash Command Analyzer
+     ca v1.0.30 — Bash Command Analyzer
      Author : John Blair
      Updated: 2025-11-10  
           
@@ -1618,6 +1605,78 @@ for s in "${shad[@]}"; do
     printf "%s    │    ${CYAN}%s${RESET}\n" "$indent" "$s"
 done
 }
+
+#------------------------------------------------------------------------
+# Function: _ca_lookup_package  # usage: _ca_lookup_package "$cmd_path" "$indent"
+# Purpose : Lookup package info for a given command path
+#------------------------------------------------------------------------
+_ca_lookup_package() {
+    local cmd_path="$1"
+    local indent="${2:-}"  # optional indentation
+    local pkg_mgr pkg_name pkg_lines=()
+
+    pkg_mgr=$(_ca_detect_pkg_manager)
+    [[ -z "$pkg_mgr" ]] && return 1  # no package manager detected
+
+    case "$pkg_mgr" in
+        dpkg)
+            pkg_name=$(dpkg -S "$cmd_path" 2>/dev/null | cut -d: -f1 | head -n1)
+            if [[ -n "$pkg_name" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                    < <(dpkg-query -W -f='${Package}\n${Version}\n${Maintainer}\n${Description}\n' "$pkg_name" 2>/dev/null)
+            fi
+            ;;
+        rpm)
+            pkg_name=$(rpm -qf "$cmd_path" 2>/dev/null)
+            if [[ -n "$pkg_name" && "$pkg_name" != "file $cmd_path is not owned by any package" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                    < <(rpm -qi "$pkg_name" | awk '
+                        NR==1{pkg=$3}
+                        NR==2{ver=$3}
+                        /^Vendor/{vendor=$3}
+                        /^Summary/{desc=$0}
+                        END{print pkg; print ver; print vendor; print desc}
+                    ')
+            fi
+            ;;
+        pacman)
+            pkg_name=$(pacman -Qo "$cmd_path" 2>/dev/null | awk '{print $5}')
+            if [[ -n "$pkg_name" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                    < <(pacman -Qi "$pkg_name" | awk -F': ' '
+                        /^Name/{print $2}
+                        /^Version/{print $2}
+                        /^Maintainer/{print $2}
+                        /^Description/{print $2}
+                    ')
+            fi
+            ;;
+    esac
+
+    # Print package info if available
+    if [[ -n "${pkg_lines[0]}" ]]; then
+        printf "%s    ↳ Package Info:\n" "$indent"
+        printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[0]}"
+        printf "%s    ⎟    Version: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[1]}"
+        printf "%s    ⎟    Maintainer: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[2]}"
+        printf "%s    ⎟    Description: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[3]}"
+    fi
+}
+
+# Detect package manager once
+_ca_detect_pkg_manager() {
+    if command -v dpkg &>/dev/null; then
+        echo "dpkg"
+    elif command -v rpm &>/dev/null; then
+        echo "rpm"
+    elif command -v pacman &>/dev/null; then
+        echo "pacman"
+    else
+        echo ""
+    fi
+}
+
+#------------------------------------------------------------------------
 
 #------------------------------------------------------------------------
 # End of script
