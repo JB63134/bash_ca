@@ -109,8 +109,6 @@ parse() {
    Operator: |
 5. Command: cut -d/ -f1 
 
-
-
 18:17:52 Thu Dec 04: ~ $ parse 'apt update & apt upgrade &'
 === Parsed Commands ===
 1. Command: apt update 
@@ -127,14 +125,7 @@ parse() {
 3. Command: mkdir test 
 
 18:26:54 Thu Dec 04: ~ $ ping -c3 www.tecmint.com && links www.tecmint.com
-PING www.tecmint.com (104.26.2.23) 56(84) bytes of data.
-64 bytes from 104.26.2.23: icmp_seq=1 ttl=56 time=48.2 ms
-64 bytes from 104.26.2.23: icmp_seq=2 ttl=56 time=86.9 ms
-^C
---- www.tecmint.com ping statistics ---
-2 packets transmitted, 2 received, 0% packet loss, time 1002ms
-rtt min/avg/max/mdev = 48.233/67.580/86.928/19.347 ms
-bash: links: command not found
+...
 
 18:27:11 Thu Dec 04: ~ $ parse
 === Parsed Commands ===
@@ -150,7 +141,16 @@ bash: links: command not found
    Operator: |                            ####### oops should be ||
 2. Command: links tecmint.com 
 
-18:28:31 Thu Dec 04: ~ $ 
+18:31:03 Thu Dec 04: ~ $ parse 'ping -c3 www.tecmint.com && echo "Verified" || echo "Host Down"'
+=== Parsed Commands ===
+1. Command: ping -c3 www.tecmint.com 
+   Operator: &                                   ####### oops should be &&
+2. Command: echo "Verified" 
+   Operator: |                                   ####### oops should be  ||
+3. Command: echo "Host Down" 
+
+18:31:16 Thu Dec 04: ~ $ 
+
 
 
 
