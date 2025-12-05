@@ -1,0 +1,64 @@
+#!/usr/bin/bash
+
+# List of control operators
+CONTROL_OPS=("||" "&&" "|&" "|" ";" "&")
+
+is_control_op() {
+    local token="$1"
+    for op in "${CONTROL_OPS[@]}"; do
+        [[ "$token" == "$op" ]] && return 0
+    done
+    return 1
+}
+
+parse_bash_command() {
+    local input="$1"
+    local tokens=()
+
+    # Tokenize using bash's own parsing rules
+    # This preserves quoted strings
+    read -r -a tokens <<< "$input"
+
+    local current_cmd=()
+    local commands=()
+    local ops=()
+
+    for tok in "${tokens[@]}"; do
+        if is_control_op "$tok"; then
+            # Store completed command
+            if [[ ${#current_cmd[@]} -gt 0 ]]; then
+                commands+=("$(printf "%s " "${current_cmd[@]}")")
+                ops+=("$tok")
+                current_cmd=()
+            fi
+        else
+            current_cmd+=("$tok")
+        fi
+    done
+
+    # Add final command
+    if [[ ${#current_cmd[@]} -gt 0 ]]; then
+        commands+=("$(printf "%s " "${current_cmd[@]}")")
+        ops+=("")
+    fi
+
+    # Print result
+    echo "=== Parsed Commands ==="
+    for ((i=0; i<${#commands[@]}; i++)); do
+        echo "$((i+1)). Command: ${commands[$i]}"
+        [[ -n "${ops[$i]}" ]] && echo "   Operator: ${ops[$i]}"
+    done
+}
+
+parse() {
+if [[ -n "$1" ]]; then
+    # Store the entire argument list as a single string
+    fcmd="$*"
+else
+    # last command from history, already a single string
+    fcmd="$(fc -ln -1)" 
+fi
+
+parse_bash_command "$fcmd"
+}
+
