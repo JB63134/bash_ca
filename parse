@@ -101,3 +101,31 @@ parse() {
     fi
     parse_bash_command "$fcmd"
 }
+
+19:01:59 Thu Dec 04: ~ $ parse 'ping -c3 www.tecmint.com && echo "Verified" || echo "Host Down"'
+=== Parsed Commands ===
+1. Command: ping -c3 www.tecmint.com 
+   Operator: &&
+2. Command: echo "Verified" 
+   Operator: ||
+3. Command: echo "Host Down" 
+
+19:02:06 Thu Dec 04: ~ $ ping -c3 www.tecmint.com && echo "Verified" || echo "Host Down"
+
+19:02:27 Thu Dec 04: ~ $ parse
+=== Parsed Commands ===
+1. Command: 	 ping -c3 www.tecmint.com 
+   Operator: &&
+2. Command: echo "Verified" 
+   Operator: ||
+3. Command: echo "Host Down" 
+
+19:02:51 Thu Dec 04: ~ $ ping -c3 www.tecmint.com && echo "Verified" & echo "Host Down"
+
+19:02:55 Thu Dec 04: ~ $ parse
+=== Parsed Commands ===
+1. Command: 	 ping -c3 www.tecmint.com 
+   Operator: &&
+2. Command: echo "Verified" 
+   Operator: &
+3. Command: echo "Host Down" 
