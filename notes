@@ -1,6 +1,5 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 
-# List of control operators
 CONTROL_OPS=("||" "&&" "|&" "|" ";" "&")
 
 is_control_op() {
@@ -11,12 +10,23 @@ is_control_op() {
     return 1
 }
 
-parse_bash_command() {
-    local input="$1"
-    local tokens=()
+preprocess_ops() {
+    local s="$1"
+    # Longest operators first to avoid splitting their components incorrectly
+    s="${s//|&/ |& }"
+    s="${s//||/ || }"
+    s="${s//&&/ && }"
+    s="${s//;/ ; }"
+    s="${s//|/ | }"
+    s="${s//&/ & }"
+    echo "$s"
+}
 
-    # Tokenize using bash's own parsing rules
-    # This preserves quoted strings
+parse_bash_command() {
+    local input
+    input="$(preprocess_ops "$1")"
+
+    local tokens=()
     read -r -a tokens <<< "$input"
 
     local current_cmd=()
@@ -25,7 +35,6 @@ parse_bash_command() {
 
     for tok in "${tokens[@]}"; do
         if is_control_op "$tok"; then
-            # Store completed command
             if [[ ${#current_cmd[@]} -gt 0 ]]; then
                 commands+=("$(printf "%s " "${current_cmd[@]}")")
                 ops+=("$tok")
@@ -36,13 +45,11 @@ parse_bash_command() {
         fi
     done
 
-    # Add final command
     if [[ ${#current_cmd[@]} -gt 0 ]]; then
         commands+=("$(printf "%s " "${current_cmd[@]}")")
         ops+=("")
     fi
 
-    # Print result
     echo "=== Parsed Commands ==="
     for ((i=0; i<${#commands[@]}; i++)); do
         echo "$((i+1)). Command: ${commands[$i]}"
@@ -51,14 +58,12 @@ parse_bash_command() {
 }
 
 parse() {
-if [[ -n "$1" ]]; then
-    # Store the entire argument list as a single string
-    fcmd="$*"
-else
-    # last command from history, already a single string
-    fcmd="$(fc -ln -1)" 
-fi
+    if [[ -n "$1" ]]; then
+        fcmd="$*"
+    else
+        fcmd="$(fc -ln -1)"
+    fi
 
-parse_bash_command "$fcmd"
+    parse_bash_command "$fcmd"
 }
 
