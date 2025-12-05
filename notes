@@ -67,3 +67,62 @@ parse() {
     parse_bash_command "$fcmd"
 }
 
+
+18:10:39 Thu Dec 04: ~ $ curl -s ipinfo.io | sed -n '2p'| sed 's/"/ /g'| awk '{print $3}'
+185.172.52.109
+
+18:10:42 Thu Dec 04: ~ $ parse 
+=== Parsed Commands ===
+1. Command: curl -s ipinfo.io 
+   Operator: |
+2. Command: sed -n '2p' 
+   Operator: |
+3. Command: sed 's/"/ /g' 
+   Operator: |
+4. Command: awk '{print $3}' 
+
+18:14:57 Thu Dec 04: ~ $ parse 'ps aux | awk '$8 ~ /^[Zz]/ {print $2}' | xargs -I {} ps -o ppid= -p {} | xargs -I {} kill -9 {}'
+=== Parsed Commands ===
+1. Command: ps aux 
+   Operator: |
+2. Command: awk /home/jb /^[Zz]/ {print } 
+   Operator: |
+3. Command: xargs -I {} ps -o ppid= -p {} 
+   Operator: |
+4. Command: xargs -I {} kill -9 {} 
+
+18:15:03 Thu Dec 04: ~ $ ip addr show | grep inet | grep -v inet6 | awk '{print $2}' | cut -d/ -f1
+127.0.0.1
+192.168.122.1
+192.168.1.147
+10.5.0.2
+
+18:15:49 Thu Dec 04: ~ $ parse 
+=== Parsed Commands ===
+1. Command: ip addr show 
+   Operator: |
+2. Command: grep inet 
+   Operator: |
+3. Command: grep -v inet6 
+   Operator: |
+4. Command: awk '{print $2}' 
+   Operator: |
+5. Command: cut -d/ -f1 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
