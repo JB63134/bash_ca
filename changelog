@@ -1,5 +1,5 @@
 V1.0.30
-     added experimental support for rpm and pacman file managers
+     added experimental support for rpm, pacman and nix file managers
 
 V1.0.28
      fixed a problem with the dependency check
