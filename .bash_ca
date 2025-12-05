@@ -1651,6 +1651,15 @@ _ca_lookup_package() {
                     ')
             fi
             ;;
+        nix)
+            # Nix/NixOS
+            if [[ "$cmd_path" == /nix/store/* ]]; then
+                pkg_name=$(nix-store --query --requisites "$cmd_path" 2>/dev/null | tail -n1)
+                if [[ -n "$pkg_name" ]]; then
+                    pkg_lines=("$pkg_name" "n/a" "nix" "Nix package installed in /nix/store")
+                fi
+            fi
+            ;;
     esac
 
     # Print package info if available
@@ -1671,6 +1680,8 @@ _ca_detect_pkg_manager() {
         echo "rpm"
     elif command -v pacman &>/dev/null; then
         echo "pacman"
+    elif command -v nix-env &>/dev/null; then
+        echo "nix"
     else
         echo ""
     fi
