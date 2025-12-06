@@ -35,29 +35,6 @@
 
 📦 Package Lookup: supports dpkg, rpm, and pacman to display the package name, version, maintainer info, and package description. 
 
-🛠️ Installation: Source .bash_ca    
-
- 
-🛠️ Usage Basic: 
-
-     ca without an argument uses history to lookup the last command ran.
-     ca <command> gives you info about a specific command.
-     Examples: 
-     ca grep  
-     ca which
-     ca awk
-     ca then
-     ca 'sudo cp'  # output can get long, i might change this
-     Analyze history references:
-     ca !42 
-
-💡 Tips Use ca when a command behaves unexpectedly. Use it to debug PATH issues or command conflicts. Use it when aliases or functions override global tools. Use it to audit your environment for security problems Or simply use it to explore Bash internals
-
-
-
-
-
-
 ---
 
 ## Features
@@ -123,7 +100,7 @@ If no command is provided, `ca` will analyze your **most recent command**.
 ## Screenshots / Output Preview
 
 ![Source and $Path modes](images/source-path.png)
-![Overridden commands](images/overridden.png)
+![Overridden commands](images/override.png)
 ![Builtins and Keywords](images/builtin-keyword.png)
 ![binry](images/awk.png)
 ![Script](images/script.png)
