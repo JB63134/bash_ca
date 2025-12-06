@@ -1,7 +1,7 @@
 # `ca` — A Bash Command Analyzer
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.30-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-1.0.32-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 ca is very BASH specific. Dpkg supported on Debian based distributions.  Experimental support has been added for additional package managers - RPM, PACMAN and nix.
   
@@ -33,7 +33,7 @@ ca is a shell-command introspection tool that tells you what a command really is
 📦 Package Lookup On Debian/Ubuntu/linux-Mint systems: uses dpkg to display the package name, version,  maintainer info, and package description. Experimental support has been added for RPM and PACMAN.
 
 🛠️ Installation: Source .bash_ca    
-opensuse - need to install libcap-progs.
+
  
 🛠️ Usage Basic: 
 
@@ -49,5 +49,3 @@ opensuse - need to install libcap-progs.
      ca !42 
 
 💡 Tips Use ca when a command behaves unexpectedly. Use it to debug PATH issues or command conflicts. Use it when aliases or functions override global tools. Use it to audit your environment for security problems Or simply use it to explore Bash internals
-
-opensuse - need to install libcap-progs
