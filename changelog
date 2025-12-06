@@ -1,5 +1,7 @@
 V1.0.38
      Major overhaul of sourced file detection to handle more nested sourced files, conditional sourcing, etc.
+     also follows bash internal logic for startup files now.
+     detects rhel fedora and adds profile.d/*sh for interactive non login shells
 
 V1.0.32
      support for rpm and packman fixed, nix dropped for now.
