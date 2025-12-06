@@ -3,9 +3,9 @@
 
 **ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, keywords, functions, text executables, and external binaries. Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
 
-requires Bash ≥ V4.4 and GNU utils
-Package Lookup: supports dpkg, rpm, and pacman 
-sourced file detection supports debian and fedora / rhel setups
+requires Bash ≥ V4.4 and GNU utils  
+Package Lookup: supports dpkg, rpm, and pacman   
+sourced file detection supports debian and fedora / rhel setups  
 
 ---
 
