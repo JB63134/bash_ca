@@ -714,7 +714,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.30 — Bash Command Analyzer
+     ca v1.0.32 — Bash Command Analyzer
      Author : John Blair
      Updated: 2025-11-10  
           
@@ -1631,38 +1631,45 @@ _ca_lookup_package() {
             if [[ -n "$pkg_name" && "$pkg_name" != "file $cmd_path is not owned by any package" ]]; then
                 while IFS= read -r line; do pkg_lines+=("$line"); done \
                     < <(rpm -qi "$pkg_name" | awk '
-                        NR==1{pkg=$3}
-                        NR==2{ver=$3}
-                        /^Vendor/{vendor=$3}
-                        /^Summary/{desc=$0}
-                        END{print pkg; print ver; print vendor; print desc}
-                    ')
+                    NR==1 { pkg=$3 }
+                    NR==2 { ver=$3 }
+                    /^Vendor/ {
+                    vendor = $3 " " $4      # space between $3 and $4
+                    }
+                    /^Summary/ {
+                    # print from field 3 to end
+                    desc = substr($0, index($0, $3))
+                    }
+                    END {
+                    print pkg
+                    print ver
+                    print vendor
+                    print desc
+                    }
+                ')
             fi
-            ;;
+            ;;   
         pacman)
             pkg_name=$(pacman -Qo "$cmd_path" 2>/dev/null | awk '{print $5}')
             if [[ -n "$pkg_name" ]]; then
                 while IFS= read -r line; do pkg_lines+=("$line"); done \
-                    < <(pacman -Qi "$pkg_name" | awk -F': ' '
-                        /^Name/{print $2}
-                        /^Version/{print $2}
-                        /^Maintainer/{print $2}
-                        /^Description/{print $2}
-                    ')
-            fi
-            ;;
-        nix)
-            # Nix/NixOS
-            if [[ "$cmd_path" == /nix/store/* ]]; then
-                pkg_name=$(nix-store --query --requisites "$cmd_path" 2>/dev/null | tail -n1)
-                if [[ -n "$pkg_name" ]]; then
-                    pkg_lines=("$pkg_name" "n/a" "nix" "Nix package installed in /nix/store")
-                fi
-            fi
-            ;;
+                < <(pacman -Qi "$pkg_name" | awk -F': *' '
+                    /^Name/        { name=$2 }
+                    /^Version/     { ver=$2 }
+                    /^Packager/    { maint=$2 }
+                    /^Description/ { desc=$2 }
+                    END {
+                        print name
+                        print ver
+                        print maint
+                        print desc
+                    }
+               ')
+           fi
+           ;;
     esac
 
-    # Print package info if available
+    # Print package info if available   ----works for apt and rpm
     if [[ -n "${pkg_lines[0]}" ]]; then
         printf "%s    ↳ Package Info:\n" "$indent"
         printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[0]}"
@@ -1680,13 +1687,11 @@ _ca_detect_pkg_manager() {
         echo "rpm"
     elif command -v pacman &>/dev/null; then
         echo "pacman"
-    elif command -v nix-env &>/dev/null; then
-        echo "nix"
     else
         echo ""
     fi
 }
-
+ 
 #------------------------------------------------------------------------
 
 #------------------------------------------------------------------------
