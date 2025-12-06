@@ -1,4 +1,4 @@
-V1.0.35
+V1.0.38
      Major overhaul of sourced file detection to handle more nested sourced files, conditional sourcing, etc.
 
 V1.0.32
