@@ -29,7 +29,7 @@ ca is a shell-command introspection tool that tells you what a command really is
 
 ⚙️ ELF Binary Analysis Displays: architecture, dynamic vs static linking, ELF interpreter, (ld-linux) capabilities, SUID/SGID bits, owner & permissions, resolved real path  (follows symlinks), List all dependencies and identify missing dependencies. 
 
-📦 Package Lookup On Debian/Ubuntu/linux-Mint systems: uses dpkg to display the package name, version,  maintainer info, and package description. Experimental support has been added for RPM and PACMAN.
+📦 Package Lookup: supports dpkg, rpm, and pacman to display the package name, version, maintainer info, and package description. 
 
 🛠️ Installation: Source .bash_ca    
 
