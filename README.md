@@ -3,51 +3,47 @@
 
 **ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, keywords, functions, text executables, and external binaries. Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
 
----
 
+
+---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.38-blue)](https://github.com/JB63134/bash_ca/releases) 
    
-
-🚀 Overview: Modern shells resolve commands through a layered chain: Alias → Function → Builtin → keyword → File in $PATH (Script / Binary).  ca tries to walk this chain recursively, determining the true implementation of any command while providing relevent information.
-
-🧪 Use Cases Understand what actually runs when you type a command.   Audit scripts and wrappers in toolchains.   Debug $PATH problems.   Identify missing dependencies.   Identify SUID / capability-based escalation paths.   Identify aliases and functions that override other commands.   Identify disabled builtins that have been overridden by executables.
-
-✨ Key Features 
-
-🔍Command Resolution: For any given command, ca identifies: aliases, functions, builtins, keywords, external binaries, wrapper scripts, interpreted scripts and follows symlinks to find the exact thing that Bash will execute.
-
-🧭 PATH Inspection: Displays the full resolved path and alerts you of symlinks. Can help you identify $PATH ordering issues, and overridden commands.
-
-🔁 Recursive Analysis: (work in progress) Depth-limited to avoid infinite loops.
-
-📜 Alias Introspection: If a command resolves to an alias, ca shows: alias definition, source file & line number (when available), recursive expansion and can alert you of aliases that shadow other files, etc.
-
-📜 Function Introspection: ca extracts full function definition with a syntax-highlighted preview, and source file & line number (when available). Can alert you of Functions that shadow other files, builtins, etc.
-
-📜 Script Introspection: ca identifies shebang interpreter, real file location (follows symlinks), shows syntax-highlighted preview.  Supports: bash, sh, python, perl, ruby, node, awk, sed, and any #! file.
-
-📜 Builtin Introspection Shows: whether the builtin is enabled, whether it is a core builtin or loadable.
-
-⚙️ ELF Binary Analysis Displays: architecture, dynamic vs static linking, ELF interpreter, (ld-linux) capabilities, SUID/SGID bits, owner & permissions, resolved real path  (follows symlinks), List all dependencies and identify missing dependencies. 
-
-📦 Package Lookup: supports dpkg, rpm, and pacman to display the package name, version, maintainer info, and package description. 
+Package Lookup: supports dpkg, rpm, and pacman 
 
 ---
 
 ## Features
 
-* Show where an alias or function is **defined** (file, line number, or interactive shell)
+* **Syntax-highlighting** of scripts and functions
+* Inspect **aliases and functions**:
+
+  * show alias definition or function body
+  * location (file and line number, or interactive shell)
+* Inspect **builtins**:
+
+  * Detect if the builtin is enabled
+  * Detect whether it is a core builtin or loadable.
 * Inspect **external binaries**:
 
+  * Displays the full resolved path and alerts you of symlinks
+  * Detects shadowed binaries
   * File type (script, ELF, etc.)
   * Interpreter for scripts
-  * Dependencies and missing libraries
+  * list Dependencies and detect missing dependencies
   * File size
   * Permissions and ownership
+  * SUID/SGID bits
   * Timestamps
   * Root privilege requirement
+ 
+* Display **Package info**:
+
+  * package name
+  * version
+  * maintainer info
+  * package description
 * Detect **overrides**:
 
   * Aliases overriding builtins or files
@@ -58,6 +54,7 @@
   * **SUID / SGID binaries**
   * **World-writable directories**
   * Writable directories in `$PATH`
+  * Recursivly detect **Sourced files** in the enviroment
 * Interactive search using `fzf` for commands (optional)
 * Pretty-printed, colorized output (uses `tput` or ANSI colors)
 
