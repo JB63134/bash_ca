@@ -1,9 +1,15 @@
-# `ca` — A Bash Command Analyzer
+---
+
+# ca – Bash Command Analyzer
+
+**ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, keywords, functions, text executables, and external binaries. Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
+
+---
+
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.38-blue)](https://github.com/JB63134/bash_ca/releases) 
    
-ca is a shell-command introspection tool that tells you what a command really is.   Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
 
 🚀 Overview: Modern shells resolve commands through a layered chain: Alias → Function → Builtin → keyword → File in $PATH (Script / Binary).  ca tries to walk this chain recursively, determining the true implementation of any command while providing relevent information.
 
@@ -50,18 +56,13 @@ ca is a shell-command introspection tool that tells you what a command really is
 
 
 
----
 
-# ca – Bash Command Analyzer
-
-**ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, keywords, functions, text executables, and external binaries. Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
 
 ---
 
 ## Features
 
-* Analyze **Bash commands, builtins, functions, and aliases**
-* Show where a command is **defined** (file, line number, or interactive shell)
+* Show where an alias or function is **defined** (file, line number, or interactive shell)
 * Inspect **external binaries**:
 
   * File type (script, ELF, etc.)
@@ -76,7 +77,6 @@ ca is a shell-command introspection tool that tells you what a command really is
   * Aliases overriding builtins or files
   * Functions overriding aliases, builtins, or binaries
   * Disabled builtins and their replacements
-* **Recursive analysis** for aliases and functions, even in pipelines
 * Scan your system for:
 
   * **SUID / SGID binaries**
