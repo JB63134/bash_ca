@@ -3,9 +3,8 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.32-blue)](https://github.com/JB63134/bash_ca/releases) 
 
-ca is very BASH specific. Dpkg supported on Debian based distributions.  Experimental support has been added for additional package managers - RPM, PACMAN and nix.
-  
-The command resolution engine from my h function became the basis for ca.  
+ca is very BASH specific. supports dpkg, rpm, and pacman. 
+   
 ca is a shell-command introspection tool that tells you what a command really is.   Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
 
 🚀 Overview: Modern shells resolve commands through a layered chain: Alias → Function → Builtin → keyword → File in $PATH (Script / Binary).  ca tries to walk this chain recursively, determining the true implementation of any command while providing relevent information.
