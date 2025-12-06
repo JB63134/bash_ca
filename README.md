@@ -54,7 +54,7 @@ ca is a shell-command introspection tool that tells you what a command really is
 
 # ca – Bash Command Analyzer
 
-**ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, functions, and external binaries. It provides detailed insights about where commands are defined, how aliases expand, command help, file metadata, permissions, and even SUID/SGID or world-writable binaries on your system.
+**ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, keywords, functions, text executables, and external binaries. Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
 
 ---
 
@@ -96,12 +96,6 @@ git clone https://github.com/yourusername/ca.git
 source /path/to/ca/.bash_ca
 ```
 
-Optionally, add to your PATH:
-
-```bash
-export PATH="$PATH:/path/to/ca"
-```
-
 ---
 
 ## Usage
@@ -124,22 +118,6 @@ If no command is provided, `ca` will analyze your **most recent command**.
 | `-p`, `--path`       | List all directories in `$PATH` and highlight writable directories |
 | `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories         |
 
----
-## Examples
-
-```bash
-# Analyze the last command you executed
-ca
-
-# Analyze a specific command
-ca ls
-
-# Analyze history
-ca !42
-
-# Inspect files directly
-ca /usr/bin/egrep
-```
 ---
 
 ## Screenshots / Output Preview
