@@ -1,3 +1,6 @@
+V1.0.32
+     support for rpm and packman fixed, nix dropped for now.
+
 V1.0.30
      added experimental support for rpm, pacman and nix file managers
 
