@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+
+# List of control operators
+CONTROL_OPS=("||" "&&" "|&" "|" ";" "&")
+
+# Check if a token is a control operator
+is_control_op() {
+    local token="$1"
+    for op in "${CONTROL_OPS[@]}"; do
+        [[ "$token" == "$op" ]] && return 0
+    done
+    return 1
+}
+
+# Tokenizer respecting quotes, escapes, and multi-char operators
+tokenize() {
+    local input="$1"
+    local -a tokens=()
+    local token=""
+    local in_single=0
+    local in_double=0
+    local i=0
+    local c next
+
+    while [[ $i -lt ${#input} ]]; do
+        c="${input:$i:1}"
+        next="${input:$((i+1)):1}"
+
+        # Handle single and double quotes
+        if [[ "$c" == "'" && $in_double -eq 0 ]]; then
+            in_single=$((1-in_single))
+            token+="$c"
+        elif [[ "$c" == '"' && $in_single -eq 0 ]]; then
+            in_double=$((1-in_double))
+            token+="$c"
+        # Detect operators only outside quotes
+        elif [[ $in_single -eq 0 && $in_double -eq 0 ]]; then
+            if [[ "$c$next" == "&&" || "$c$next" == "||" || "$c$next" == "|&" ]]; then
+                [[ -n "$token" ]] && tokens+=("$token")
+                tokens+=("$c$next")
+                token=""
+                i=$((i+1))
+            elif [[ "$c" == "|" || "$c" == "&" || "$c" == ";" ]]; then
+                [[ -n "$token" ]] && tokens+=("$token")
+                tokens+=("$c")
+                token=""
+            elif [[ "$c" == " " ]]; then
+                [[ -n "$token" ]] && tokens+=("$token")
+                token=""
+            else
+                token+="$c"
+            fi
+        else
+            token+="$c"
+        fi
+        i=$((i+1))
+    done
+
+    [[ -n "$token" ]] && tokens+=("$token")
+
+    echo "${tokens[@]}"
+}
+
+# Parse a Bash command string into commands and operators
+parse_bash_command() {
+    local input="$1"
+    IFS=' ' read -r -a tokens <<< "$(tokenize "$input")"
+
+    local current_cmd=()
+    local commands=()
+    local ops=()
+
+    for tok in "${tokens[@]}"; do
+        if is_control_op "$tok"; then
+            if [[ ${#current_cmd[@]} -gt 0 ]]; then
+                commands+=("$(printf "%s " "${current_cmd[@]}")")
+                ops+=("$tok")
+                current_cmd=()
+            fi
+        else
+            current_cmd+=("$tok")
+        fi
+    done
+
+    [[ ${#current_cmd[@]} -gt 0 ]] && commands+=("$(printf "%s " "${current_cmd[@]}")") && ops+=("")
+
+    echo "=== Parsed Commands ==="
+    for ((i=0; i<${#commands[@]}; i++)); do
+        echo "$((i+1)). Command: ${commands[$i]}"
+        [[ -n "${ops[$i]}" ]] && echo "   Operator: ${ops[$i]}"
+    done
+}
+
+# Wrapper to parse either provided command or previous history command
+parse() {
+    local fcmd
+    if [[ -n "$1" ]]; then
+        fcmd="$*"
+    else
+        fcmd="$(fc -ln -1)"
+    fi
+    parse_bash_command "$fcmd"
+}
+
+19:01:59 Thu Dec 04: ~ $ parse 'ping -c3 www.tecmint.com && echo "Verified" || echo "Host Down"'
+=== Parsed Commands ===
+1. Command: ping -c3 www.tecmint.com 
+   Operator: &&
+2. Command: echo "Verified" 
+   Operator: ||
+3. Command: echo "Host Down" 
+
+19:02:06 Thu Dec 04: ~ $ ping -c3 www.tecmint.com && echo "Verified" || echo "Host Down"
+
+19:02:27 Thu Dec 04: ~ $ parse
+=== Parsed Commands ===
+1. Command: 	 ping -c3 www.tecmint.com 
+   Operator: &&
+2. Command: echo "Verified" 
+   Operator: ||
+3. Command: echo "Host Down" 
+
+19:02:51 Thu Dec 04: ~ $ ping -c3 www.tecmint.com && echo "Verified" & echo "Host Down"
+
+19:02:55 Thu Dec 04: ~ $ parse
+=== Parsed Commands ===
+1. Command: 	 ping -c3 www.tecmint.com 
+   Operator: &&
+2. Command: echo "Verified" 
+   Operator: &
+3. Command: echo "Host Down" 
