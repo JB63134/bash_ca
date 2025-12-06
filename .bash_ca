@@ -17,8 +17,8 @@ ca_optional_deps=(tput fzf batcat bat dpkg rpm pacman)
 
 OLD_PATH="$PATH"
 
-declare -gA __CA_SOURCED_FILES_MAP=()   # associative array to avoid duplicates
-declare -ga __CA_SOURCED_FILES_LIST=()  # optional list preserving order
+declare -gA __CA_SOURCED_FILES_MAP=()    
+declare -ga __CA_SOURCED_FILES_LIST=()  
 declare -gA __CA_SEEN_ALIASES
 declare -gA __CA_SEEN_COMMANDS
 declare -gA __CA_SEEN_BUILTINS
@@ -33,7 +33,7 @@ ca() {
     local fcmd cmd ctype cmd_path alias_expansion RED GREEN CYAN RESET 
     local depth=${2:-0}
     local cmdline="$*"
-    local MAX_DEPTH=8
+    local MAX_DEPTH=5
     local indent
     indent=$(printf "%*s" $((depth * 4)) "")
     
@@ -607,7 +607,7 @@ _ca_lookup_package "$cmd_path" "$indent"
 
             # Determine risk level
             if [[ ${owner_perm:2:1} =~ [sS] ]]; then
-                risk_color="${RED}"      # SUID → high risk
+                risk_color="${YELLOW}"      # SUID → high risk
                 sid="[SUID]"
             elif [[ ${group_perm:2:1} =~ [sS] ]]; then
                 risk_color="${YELLOW}"   # SGID → medium risk
@@ -621,7 +621,7 @@ _ca_lookup_package "$cmd_path" "$indent"
 
             # Highlight the s or S in yellow
             if [[ ${owner_perm:2:1} =~ [sS] ]]; then
-                owner_perm="${owner_perm:0:2}${RED}${owner_perm:2:1}${RESET}"
+                owner_perm="${owner_perm:0:2}${YELLOW}${owner_perm:2:1}${RESET}"
             fi
 
             if [[ ${group_perm:2:1} =~ [sS] ]]; then
@@ -716,7 +716,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.38 — Bash Command Analyzer
+     ca v1.0.39 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -959,7 +959,7 @@ __CA_SOURCED_FILES_LIST+=("$expanded")
         if [[ $line =~ source[[:space:]]+\"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\[@\]\}\" ]]; then
             local arr_name="${BASH_REMATCH[1]}"
             local elems
-            IFS=$'\n' read -r -d '' -a elems < <(eval "printf '%s\n' \"\${$arr_name[@]}\"")
+            IFS=$'\n' read -r -d '' -a elems < <(eval "printf '%s\n' \"\${${arr_name}[@]}\"")
             for f in "${elems[@]}"; do
                 f=$(_ca_expand_path "$f")
                 [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
