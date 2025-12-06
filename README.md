@@ -1,5 +1,5 @@
 ---
-
+ 
 # ca – Bash Command Analyzer
 
 **ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, keywords, functions, text executables, and external binaries. Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all resolution logic into a single command analysis engine.
