@@ -46,3 +46,155 @@ ca is a shell-command introspection tool that tells you what a command really is
      ca !42 
 
 💡 Tips Use ca when a command behaves unexpectedly. Use it to debug PATH issues or command conflicts. Use it when aliases or functions override global tools. Use it to audit your environment for security problems Or simply use it to explore Bash internals
+
+
+
+
+---
+
+# ca – Bash Command Analyzer
+
+**ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, functions, and external binaries. It provides detailed insights about where commands are defined, how aliases expand, command help, file metadata, permissions, and even SUID/SGID or world-writable binaries on your system.
+
+---
+
+## Features
+
+* Analyze **Bash commands, builtins, functions, and aliases**
+* Show where a command is **defined** (file, line number, or interactive shell)
+* Inspect **external binaries**:
+
+  * File type (script, ELF, etc.)
+  * Interpreter for scripts
+  * Dependencies and missing libraries
+  * File size
+  * Permissions and ownership
+  * Timestamps
+  * Root privilege requirement
+* Detect **overrides**:
+
+  * Aliases overriding builtins or files
+  * Functions overriding aliases, builtins, or binaries
+  * Disabled builtins and their replacements
+* **Recursive analysis** for aliases and functions, even in pipelines
+* Scan your system for:
+
+  * **SUID / SGID binaries**
+  * **World-writable directories**
+  * Writable directories in `$PATH`
+* Interactive search using `fzf` for commands (optional)
+* Pretty-printed, colorized output (uses `tput` or ANSI colors)
+
+---
+
+## Installation
+
+Clone the repository and source the script in your `.bashrc` or `.bash_profile`:
+
+```bash
+git clone https://github.com/yourusername/ca.git
+source /path/to/ca/.bash_ca
+```
+
+Optionally, add to your PATH:
+
+```bash
+export PATH="$PATH:/path/to/ca"
+```
+
+---
+
+## Usage
+
+```bash
+ca [command]
+```
+
+If no command is provided, `ca` will analyze your **most recent command**.
+
+### Options
+
+| Option               | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| `-h`, `--help`       | Show help text                                                     |
+| `-v`, `--version`    | Show version information                                           |
+| `-f`, `--fzf`        | Interactively search for commands (requires `fzf`)                 |
+| `-s`, `--sourced`    | List all sourced files in your environment                         |
+| `-o`, `--overridden` | List commands that override others                                 |
+| `-p`, `--path`       | List all directories in `$PATH` and highlight writable directories |
+| `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories         |
+
+---
+
+## Examples
+
+```bash
+# Analyze the last command you executed
+ca
+
+# Analyze a specific command
+ca ls
+
+# Analyze a function
+ca my_function
+
+# Inspect aliases and their expansions
+ca --overridden
+
+# Scan your system for potentially risky files and directories
+ca --scan
+
+# List writable directories in PATH
+ca --path
+
+# Interactive search with fzf
+ca --fzf
+```
+
+---
+
+## Dependencies
+
+**Required:**
+
+* `grep`, `basename`, `file`, `find`, `sed`, `cut`, `head`, `readlink`, `realpath`, `awk`, `ldd`, `getcap`, `perl`
+
+**Optional (enhanced features):**
+
+* `tput` for colors
+* `fzf` for interactive command selection
+* `bat` / `batcat` for syntax-highlighted script previews
+* `dpkg`, `rpm`, `pacman` for package lookup
+
+---
+
+## License
+
+MIT License © 2025 John Blair
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+
+---
+
+## Screenshots / Output Preview
+
+![Source and $Path modes](images/source-path.png)
+![Overridden commands](images/overridden.png)
+![Builtins and Keywords](images/builtin-keyword.png)
+![binry](images/awk.png)
+![Script](images/script.png)
+![World-Writable file](images/world-writable.png)
+![SGID](images/sgid.png)
+![SUID](images/suid.png)
+![Scan mode](images/scanmode.png)
+
+---
+
+
+
+
+
