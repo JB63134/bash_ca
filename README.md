@@ -125,7 +125,6 @@ If no command is provided, `ca` will analyze your **most recent command**.
 | `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories         |
 
 ---
-
 ## Examples
 
 ```bash
@@ -135,49 +134,12 @@ ca
 # Analyze a specific command
 ca ls
 
-# Analyze a function
-ca my_function
+# Analyze history
+ca !42
 
-# Inspect aliases and their expansions
-ca --overridden
-
-# Scan your system for potentially risky files and directories
-ca --scan
-
-# List writable directories in PATH
-ca --path
-
-# Interactive search with fzf
-ca --fzf
+# Inspect files directly
+ca /usr/bin/egrep
 ```
-
----
-
-## Dependencies
-
-**Required:**
-
-* `grep`, `basename`, `file`, `find`, `sed`, `cut`, `head`, `readlink`, `realpath`, `awk`, `ldd`, `getcap`, `perl`
-
-**Optional (enhanced features):**
-
-* `tput` for colors
-* `fzf` for interactive command selection
-* `bat` / `batcat` for syntax-highlighted script previews
-* `dpkg`, `rpm`, `pacman` for package lookup
-
----
-
-## License
-
-MIT License © 2025 John Blair
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
-
 ---
 
 ## Screenshots / Output Preview
