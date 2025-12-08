@@ -1,3 +1,7 @@
+V1.0.45
+     did some work on recursive alias expansion - command operators are now supported
+     ui fixes...
+
 V1.0.39
      Fixed problem with variable expansion - Passed Shellcheck
 
