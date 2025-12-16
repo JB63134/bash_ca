@@ -179,84 +179,15 @@ ca() {
     fi
     
     # ------------------------------------------------------------------------- 
-    # Handle command operators
+    # Handle command operators in recursion
     # -------------------------------------------------------------------------     
     local cmd1 cmd2
     cmd1="${YELLOW}command1${RESET}"
     cmd2="${GREEN}command2${RESET}"
     
-    if [[ "$cmd" == "&&" ]]; then
-        if (( ca_help_on == 1 )); then   
-            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd" 
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          The ${CYAN}'%s'${RESET} operator is a logical AND used to chain commands.\n" "$indent" "$cmd"
-            printf "%s          %s ${CYAN}'%s'${RESET} %s\n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          %s runs only if %s succeeds.\n" "$indent" "$cmd2" "$cmd1"
-            printf "%s          'Succeeds' means %s exits with status 0 (no error).\n" "$indent" "$cmd1"
-            printf "%s          If %s fails (exit status ≠ 0), Bash does not execute %s.\n" "$indent" "$cmd1" "$cmd2"
-        fi   
-        return 0 
-    fi
-
-    if [[ "$cmd" == "||" ]]; then
-        if (( ca_help_on == 1 )); then   
-            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd" 
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          The ${CYAN}'%s'${RESET} operator is a logical OR used to chain commands.\n" "$indent" "$cmd"
-            printf "%s          %s ${CYAN}'%s'${RESET} %s \n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          %s runs only if %s fails.\n" "$indent" "$cmd2" "$cmd1"
-            printf "%s          'Fails' means %s exits with a non-zero exit status.\n" "$indent" "$cmd1"
-            printf "%s          If %s succeeds (exit status 0), Bash skips %s.\n" "$indent" "$cmd1" "$cmd2"
-        fi    
-        return 0
-    fi
-    
-    if [[ "$cmd" == "&" ]]; then
-       if (( ca_help_on == 1 )); then  
-            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd" 
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          The ${CYAN}'%s'${RESET} operator runs the prior command in the background.\n" "$indent" "$cmd"
-            printf "%s          %s ${CYAN}'%s'${RESET} \n" "$indent" "$cmd1" "$cmd"
-            printf "%s          %s becomes a background job.\n" "$indent" "$cmd1"
-       fi  
-       return 0  
-    fi
-    
-    if [[ "$cmd" == "|" ]]; then
-        if (( ca_help_on == 1 )); then   
-            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd" 
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Sends the stdout of %s to stdin of %s.\n" "$indent" "$cmd1" "$cmd2"
-            printf "%s          %s ${CYAN}'%s'${RESET} %s \n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          %s receives whatever %s prints.\n" "$indent" "$cmd2" "$cmd1" 
-            printf "%s          Execution of %s does not depend on success/failure of %s.\n" "$indent" "$cmd2" "$cmd1" 
-        fi    
-        return 0
-    fi
-    
-    if [[ "$cmd" == "|&" ]]; then
-        if (( ca_help_on == 1 )); then   
-            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd" 
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Sends the stdout and stderr of %s to stdin of %s.\n" "$indent" "$cmd1" "$cmd2"
-            printf "%s          %s ${CYAN}'%s'${RESET} %s \n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          %s receives whatever %s prints.\n" "$indent" "$cmd2" "$cmd1" 
-            printf "%s          Execution of %s does not depend on success/failure of %s.\n" "$indent" "$cmd2" "$cmd1" 
-        fi    
-        return 0
-    fi
-    
-    if [[ "$cmd" == ";" ]]; then
-        if (( ca_help_on == 1 )); then   
-            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd" 
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          %s ${CYAN}'%s'${RESET} %s \n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          Run %s, then run %s.\n" "$indent" "$cmd1" "$cmd2"
-            printf "%s          Regardless of whether %s succeeds or fails.\n" "$indent" "$cmd1" 
-        fi    
+    if [[ "$cmd" == "&&" ]]||[[ "$cmd" == "||" ]] || [[ "$cmd" == "&" ]] || [[ "$cmd" == "|" ]] || [[ "$cmd" == "|&" ]] || [[ "$cmd" == ";" ]]; then  
         return 0
     fi    
-    
     
     # -------------------------------------------------------------------------
     # Split and analyze pipelines, chains, and lists safely
@@ -436,7 +367,7 @@ ca() {
         local raw
         raw=$(alias "$cmd")
         alias_expansion=${raw#*=}         # remove 'name='
-        alias_expansion=${alias_expansion:1:${#alias_expansion}-2}   # trim outer quotes
+        alias_expansion=$(alias "$cmd" | sed -E "s/^$cmd='(.*)'$/\1/")  # trim outer quotes
         # Expand environment vars safely (no command execution)
         alias_expansion=$(_ca_expand_vars "$alias_expansion")
         alias_def=$(alias "$cmd")
@@ -513,10 +444,7 @@ ca() {
     # External commands
     # -------------------------------------------------------------------------
     if [[ "$ctype" == "file" ]]; then
-        cmd_path=$(command -v "$cmd") || {
-            printf "%s${RED}Command not found: '%s'${RESET}\n" "$indent" "$cmd"
-            return 1
-        }
+        cmd_path=$(command -v "$cmd") 
 
         local cmd_real formatted_type file_info
         cmd_real=$(readlink -f "$cmd_path" 2>/dev/null || echo "$cmd_path")
@@ -656,7 +584,6 @@ ca() {
 # Package info
 _ca_lookup_package "$cmd_path" "$indent"
         
-
         # Permissions
         if [[ -x "$cmd_path" ]]; then
             local perms octal owner_grp owner_perm group_perm other_perm risk_color
@@ -753,8 +680,7 @@ _ca_usage() {
     cat <<'EOF'
 
      Usage:  ca [command]  
-     Analyzes a Bash command, alias, builtin, function, or binary — showing where it’s defined,
-     how it expands, and what help or documentation is available.
+     Analyze aliases, builtins, keywords, functions, scripts or binaries.
 
      Options:
            -h --help or h      Show this help text.
@@ -764,8 +690,7 @@ _ca_usage() {
            -o --overridden     List all commands that override another command in the enviroment.
            -p --path           list all directories in $PATH and highlight writable directories.
            -S --scan           Scan for SUID and SGID binaries and World Writable directories.
-           -x --trace          Executon tracing  (set -x wrapper)    
-    
+         
      Examples:
            ca                   # Automatically analyzes your most recent command
            ca awk               # Analyzes 'awk'
@@ -781,7 +706,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.45 — Bash Command Analyzer
+     ca v1.0.47 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -948,8 +873,6 @@ else
         fi
     fi
 fi  
-
-[[ $- != *i* ]] 
   
     for file in "${files[@]}"; do
         _ca_sourcedtree_single "$file" "$depth" "$max_depth"
@@ -968,7 +891,6 @@ _ca_sourcedtree_single() {
 local expanded
 expanded=$(_ca_expand_path "$file")
 expanded="${expanded%%$'\n'}"   # strip newlines
-expanded="${expanded// /}"      # optional: remove spaces if needed
 
 # Skip empty, duplicates, or unreadable files
 [[ -z "$expanded" ]] && return
@@ -1034,7 +956,6 @@ __CA_SOURCED_FILES_LIST+=("$expanded")
     done < "$expanded"
 }
 
-
     #-----------------------------------------------------------
     # Helper: _ca_expand_path
 _ca_expand_path() {
@@ -1064,7 +985,6 @@ _ca_expand_path() {
     p="${p%%*( )}"
     printf '%s' "$p"
 }
-
 
 #------------------------------------------------------------------------
 # Function: _ca_highlight_script   # _ca_highlight_script "$path-to-script" "<blankspaces>"
