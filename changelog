@@ -1,3 +1,7 @@
+V1.0.47  
+     Fixed problem with alias expansion
+     code cleanup. -- passed shellcheck
+
 V1.0.45
      did some work on recursive alias expansion - some command operators are now supported
      ui fixes...
