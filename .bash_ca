@@ -15,8 +15,6 @@ ca_needed_deps=(grep basename file find sed cut head readlink realpath awk ldd g
 # shellcheck disable=SC2034
 ca_optional_deps=(tput fzf batcat bat dpkg rpm pacman)
 
-ca_help_on=0
-
 OLD_PATH="$PATH"
 
 declare -gA __CA_SOURCED_FILES_MAP=()    
@@ -180,11 +178,7 @@ ca() {
     
     # ------------------------------------------------------------------------- 
     # Handle command operators in recursion
-    # -------------------------------------------------------------------------     
-    local cmd1 cmd2
-    cmd1="${YELLOW}command1${RESET}"
-    cmd2="${GREEN}command2${RESET}"
-    
+    # -------------------------------------------------------------------------        
     if [[ "$cmd" == "&&" ]]||[[ "$cmd" == "||" ]] || [[ "$cmd" == "&" ]] || [[ "$cmd" == "|" ]] || [[ "$cmd" == "|&" ]] || [[ "$cmd" == ";" ]]; then  
         return 0
     fi    
