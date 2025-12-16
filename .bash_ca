@@ -17,6 +17,7 @@ ca_optional_deps=(tput fzf batcat bat dpkg rpm pacman)
 
 OLD_PATH="$PATH"
 
+declare -g __CA_SOURCED_SCANNED=0
 declare -gA __CA_SOURCED_FILES_MAP=()    
 declare -ga __CA_SOURCED_FILES_LIST=()  
 declare -gA __CA_SEEN_ALIASES
@@ -82,6 +83,7 @@ ca() {
         #--------------------------
         # Reset arrays on first run
         #--------------------------
+        __CA_SOURCED_SCANNED=0
         __CA_SEEN_ALIASES=()
         __CA_SEEN_COMMANDS=()
         __CA_SEEN_BUILTINS=()
@@ -216,62 +218,33 @@ ca() {
     # -------------------------------------------------------------------------
     # Handle keywords and provide help statements
     # -------------------------------------------------------------------------
-    if [[ "$ctype" == "keyword" ]]; then
-        printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
-     
-        case "$cmd" in
-        if|case|for|select|while|until|function|time|[[|coproc)
-            printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
-            help "$cmd" 2>/dev/null | sed 's/^/    /'
-            return 0
-            ;;
-        esac
-        if [[ "$cmd" == "{" ]]; then
-            printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
-            help "$cmd" 2>/dev/null | sed 's/^/    /'
-            return 0
-        fi
-        case "$cmd" in
-            then|else|elif|fi|do|done|in|!|])
-                description=""
-                case "$cmd" in
-                    then) description="Part of an if statment - Begins the command block for a true condition." ;;
-                    else) description="Part of an if statment - Begins the command block if the condition is false." ;;
-                    elif) description="Part of an if statment - Introduces a new condition if the previous one is false." ;;
-                    fi)   description="Ends an if statement." ;;
-                    do)   description="Begins the body of a loop or conditional block." ;;
-                    done) description="Ends the body of a loop or conditional block." ;;
-                    in)   description="Specifies the list to iterate over in a loop." ;;
-                    !)    description="Negates the exit status of a command or pipeline." ;;
-                esac
-            printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          ${CYAN}%s${RESET} -- %s\n" "$indent" "$cmd" "$description"
-            return 0
-            ;;
-        esac
+declare -A __H_KEYWORD_DESC=(
+    [then]="Part of an if statment - Begins the command block for a true condition." 
+    [else]="Part of an if statment - Begins the command block if the condition is false." 
+    [elif]="Part of an if statment - Introduces a new condition if the previous one is false." 
+    [fi]="Ends an if statement."
+    [do]="Begins the body of a loop or conditional block."
+    [done]="Ends the body of a loop or conditional block." 
+    [in]="Specifies the list to iterate over in a loop." 
+    [!]="Negates the exit status of a command or pipeline." 
+    [esac]="Ends a case statement."
+    ["}"]="Ends a command block."
+    ["]]"]="Ends a conditional test expression."
+)
 
-        if [[ "$cmd" == "esac" ]]; then
-            printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          ${CYAN}%s${RESET} -- Ends a case statement.\n" "$indent" "$cmd"
-            return 0
-        fi
+if [[ $ctype == keyword ]]; then
+    printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
 
-        if [[ "$cmd" == "}" ]]; then
-            printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          ${CYAN}%s${RESET} -- Ends a command block.\n" "$indent" "$cmd"
-            return 0
-        fi
-      
-        if [[ "$cmd" == "]]" ]]; then
-            printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          ${CYAN}%s${RESET} -- Ends a conditional test expression.\n" "$indent" "$cmd"
-            return 0
-        fi
+    if help "$cmd" &>/dev/null; then
+        printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
+        help "$cmd" 2>/dev/null | sed 's/^/    /'
+    elif [[ -n "${__H_KEYWORD_DESC[$cmd]}" ]]; then
+        printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$indent" "$cmd"
+        printf "%s    ↳ Definition:\n\n" "$indent"
+        printf "%s          ${CYAN}%s${RESET} -- %s\n" "$indent" "$cmd" "${__H_KEYWORD_DESC[$cmd]}"
     fi
+    return 0
+fi
     
     # -------------------------------------------------------------------------
     # Builtins
@@ -361,8 +334,7 @@ ca() {
         local raw
         raw=$(alias "$cmd")
         alias_expansion=${raw#*=}         # remove 'name='
-        alias_expansion=$(alias "$cmd" | sed -E "s/^$cmd='(.*)'$/\1/")  # trim outer quotes
-        # Expand environment vars safely (no command execution)
+        alias_expansion=${alias_expansion:1:${#alias_expansion}-2}   # trim outer quotes
         alias_expansion=$(_ca_expand_vars "$alias_expansion")
         alias_def=$(alias "$cmd")
         
@@ -373,7 +345,7 @@ ca() {
         local found_location=""
         local line_number
         
-        _ca_sourcedtree
+        _ca_ensure_sourcedtree
         
         #-----------------------------------------------------
         # Enable nullglob temporarily 
@@ -700,7 +672,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.47 — Bash Command Analyzer
+     ca v1.0.48 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -822,8 +794,6 @@ _ca_expand_vars() {
 # Purpose: Recursively scan .bashrc for ALL files that are sourced. including conditionals.
 #------------------------------------------------------------------------
 _ca_sourcedtree() {
-    __CA_SOURCED_FILES_MAP=()
-    __CA_SOURCED_FILES_LIST=()
     local file files depth max_depth
     depth=0
     max_depth="${MAX_DEPTH:-5}"
@@ -978,6 +948,14 @@ _ca_expand_path() {
     p="${p//$'\n'/}"
     p="${p%%*( )}"
     printf '%s' "$p"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_ensure_sourcedtree
+_ca_ensure_sourcedtree() {
+    (( __CA_SOURCED_SCANNED )) && return
+    _ca_sourcedtree
+    __CA_SOURCED_SCANNED=1
 }
 
 #------------------------------------------------------------------------
