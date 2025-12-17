@@ -205,74 +205,74 @@ ca() {
             printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
             printf "%s          Logical AND: %s ${CYAN}'%s'${RESET} %s\n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          Runs %s only if %s succeeds (exit status 0).\n" "$indent" "$cmd2" "$cmd1"
+            printf "%s          Runs %s only if %s succeeds (exit status 0).\n\n" "$indent" "$cmd2" "$cmd1"
             return 0
             ;;
         "||")
             printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
             printf "%s          Logical OR: %s ${CYAN}'%s'${RESET} %s\n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          Runs %s only if %s fails (non-zero exit status).\n" "$indent" "$cmd2" "$cmd1"
+            printf "%s          Runs %s only if %s fails (non-zero exit status).\n\n" "$indent" "$cmd2" "$cmd1"
             return 0            
             ;;
         "&")
             printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET} (background)\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Runs %s in the background.\n" "$indent" "$cmd1"
+            printf "%s          Runs %s in the background.\n\n" "$indent" "$cmd1"
             return 0            
             ;;
         "|")
             printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Sends stdout of %s to stdin of %s.\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s          Sends stdout of %s to stdin of %s.\n\n" "$indent" "$cmd1" "$cmd2"
             return 0 
             ;;
         "|&")
             printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET} (stderr+stdout)\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Sends both stdout and stderr of %s to stdin of %s.\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s          Sends both stdout and stderr of %s to stdin of %s.\n\n" "$indent" "$cmd1" "$cmd2"
             return 0 
             ;;
         ";")
             printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET} (sequence)\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Run %s, then run %s regardless of success/failure.\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s          Run %s, then run %s regardless of success/failure.\n\n" "$indent" "$cmd1" "$cmd2"
             return 0 
             ;;
         "<")
             printf "%s├─ Detected input redirection ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Reads input of %s from %s instead of stdin.\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s          Reads input of %s from %s instead of stdin.\n\n" "$indent" "$cmd1" "$cmd2"
             return 0 
             ;;
         ">")
             printf "%s├─ Detected output redirection ${CYAN}'%s'${RESET} (overwrite)\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Redirects stdout of %s to %s (overwrite file).\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s          Redirects stdout of %s to %s (overwrite file).\n\n" "$indent" "$cmd1" "$cmd2"
             return 0 
             ;;
         ">>")
             printf "%s├─ Detected output redirection ${CYAN}'%s'${RESET} (append)\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Redirects stdout of %s to %s (append to file).\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s          Redirects stdout of %s to %s (append to file).\n\n" "$indent" "$cmd1" "$cmd2"
             return 0 
             ;;
         "2>")
             printf "%s├─ Detected stderr redirection ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Redirects stderr of %s to %s.\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s          Redirects stderr of %s to %s.\n\n" "$indent" "$cmd1" "$cmd2"
             return 0 
             ;;
         "&>")
             printf "%s├─ Detected stdout+stderr redirection ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Redirects both stdout and stderr of %s to %s.\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s          Redirects both stdout and stderr of %s to %s.\n\n" "$indent" "$cmd1" "$cmd2"
             return 0 
             ;;
         "<<<")
             printf "%s├─ Detected here-string ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
             printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Passes a string directly as stdin to %s.\n" "$indent" "$cmd2"
+            printf "%s          Passes a string directly as stdin to %s.\n\n" "$indent" "$cmd2"
             return 0 
             ;;
     esac
