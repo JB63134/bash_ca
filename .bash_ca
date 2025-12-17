@@ -1888,8 +1888,7 @@ if [[ "$ctype" == "file" ]]; then
             fi
             ;;
         rpm)
-            pkg=$(rpm -qf "$cmd_real" 2>/dev/null)
-            if [[ $? -eq 0 ]]; then
+            if pkg=$(rpm -qf "$cmd_real" 2>/dev/null); then
                 verify=$(rpm -V "$pkg" | grep -F "$cmd_real")
             fi
             ;;   
