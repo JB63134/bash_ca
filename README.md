@@ -5,7 +5,7 @@
 
 Requires: Bash ≥ V4.4 and GNU utils  
 Package Lookup: supports dpkg, rpm, and pacman   
-Sourced file detection: supports Debian and Fedora / RHEL setups  
+Sourced file detection: supports Debian and Fedora / RHEL style setups  
 
 ---
 
