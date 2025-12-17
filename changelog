@@ -1,3 +1,6 @@
+V1.0.51
+     new function to generate hashes of aliases functions binaries and scripts
+
 V1.0.50
      handle more bash operators, pipeline symbols, redirections, etc. during recursion
     
