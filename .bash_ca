@@ -403,7 +403,7 @@ fi
         else
             printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$file" "$line"
         fi
-        
+        _ca_show_hash "$indent" "$cmd"
         printf "%s    ↳ Showing preview of function: ${CYAN}%s${RESET}\n\n"  "$indent" "$cmd"     
            
         local func_content
@@ -462,7 +462,7 @@ fi
         if [[ -z "$found_location" ]]; then
             printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$indent"
         fi     
-    
+        _ca_show_hash "$indent" "$cmd"
         # Handle alias expansion with chain/pipeline parsing
         if [[ "$alias_expansion" =~ [\|\&\;] ]]; then
             local segments=()
@@ -547,8 +547,8 @@ fi
         
         local shahash
         shahash=$(sha256sum "$cmd_path" | awk '{print $1}' )
-        printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$indent" "$shahash" 
-        
+        # printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$indent" "$shahash" 
+        _ca_show_hash "$indent" "$cmd_path"
         # Root privilege detection
         local requires_root=0
         local root_reason=""
@@ -768,7 +768,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.50 — Bash Command Analyzer
+     ca v1.0.51 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -1912,6 +1912,36 @@ if [[ "$ctype" == "file" ]]; then
     printf " ├─ SHA256: %s\n" "$sha"    
     printf " └─ Status: %s\n" "$status"
 fi    
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_show_hash  # usage: _ca_show_hash "$indent" "$cmd_path"
+# Purpose : calc hashes
+#------------------------------------------------------------------------
+_ca_show_hash() {
+    local indent="$1"
+    local cmd="$2"
+    local ctype 
+    local hash=""
+    ctype=$(type -t -- "$cmd" 2>/dev/null)
+    
+    case "$ctype" in
+        alias)
+            # hash the resolved alias string
+            hash=$(alias "$cmd" 2>/dev/null | awk -F"=" '{print $2}' | sha256sum | awk '{print $1}')
+            ;;
+        function)
+            # hash the function body
+            hash=$(declare -f "$cmd" | sha256sum | awk '{print $1}')
+            ;;
+        file)
+            local path
+            path=$(command -v "$cmd")
+            [[ -x "$path" ]] && hash=$(sha256sum "$path" | awk '{print $1}')
+            ;;
+    esac
+
+    [[ -n "$hash" ]] && printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$indent" "$hash"
 }
 
 #------------------------------------------------------------------------
