@@ -10,7 +10,7 @@ Sourced file detection: supports Debian and Fedora / RHEL setups
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.48-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-1.0.50-blue)](https://github.com/JB63134/bash_ca/releases) 
 
    
 ---
@@ -99,7 +99,8 @@ If no command is provided, `ca` will analyze your **most recent command**.
 ![Source and $Path modes](images/source-path.png)
 ![Overridden commands](images/override.png)
 ![Builtins and Keywords](images/builtin-keyword.png)
-![binry](images/awk.png)
+![Binary](images/awk.png)
+![Aliases](images/alias.png)
 ![Script](images/script.png)
 ![World-Writable file](images/world-writable.png)
 ![SGID](images/sgid.png)
