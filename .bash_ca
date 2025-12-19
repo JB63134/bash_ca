@@ -399,10 +399,14 @@ fi
         
         printf "%s├─ ${CYAN}'%q' ${RESET}is a shell function\n" "$indent" "$cmd"
         
+
+ found_location=$(printf "\e]8;;file://%s\a%s\e]8;;\a" "$file" "$file")
+        
+        
         if [[ "$file" == "main" ]]; then
             printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$indent"
         else
-            printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$file" "$line"
+            printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$found_location" "$line"
         fi
         _ca_show_hash "$indent" "$cmd"
         printf "%s    ↳ Showing preview of function: ${CYAN}%s${RESET}\n\n"  "$indent" "$cmd"     
@@ -452,9 +456,9 @@ fi
         for file in "${__CA_SOURCED_FILES_LIST[@]}"; do 
              [[ -r "$file" ]] || continue
              if grep -qE "^[[:space:]]*alias[[:space:]]+${cmd}=" "$file"; then
-                found_location="$file"
+ found_location=$(printf "\e]8;;file://%s\a%s\e]8;;\a" "$file" "$file")
                 line_number=$(grep -nE "^[[:space:]]*alias[[:space:]]+$cmd=" "$file" | head -n1 | cut -d: -f1)
-                printf "%s    ↳ Defined in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$file" "$line_number"
+                printf "%s    ↳ Defined in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$found_location" "$line_number"
              fi
         done
         (( !nullglob_was )) && shopt -u nullglob  # Restore nullglob state if we enabled it
@@ -709,9 +713,12 @@ _ca_lookup_package "$cmd_path" "$indent"
             perlfound=1
         fi
     
+
+     found_location=$(printf "\e]8;;file://%s\a%s\e]8;;\a" "$cmd_path" "$cmd_path")
+     
         # Dump script content
         if grep -qiE 'script|text executable' <<< "$file_info"; then
-            printf "%s    ↳ Showing preview of script ${CYAN}'%s'${RESET}:\n" "$indent" "$cmd"
+            printf "%s    ↳ Showing preview of script ${CYAN}'%s'${RESET}: %s\n" "$indent" "$found_location"
             if (( perlfound == 0 )); then 
                 printf "%s    ↳ ${YELLOW}Optional dependency 'perl' missing — syntax highlighting reduced${RESET}\n" "$indent" 
             fi           
@@ -768,7 +775,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.70 — Bash Command Analyzer
+     ca v1.0.71 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
