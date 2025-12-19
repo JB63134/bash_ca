@@ -1,3 +1,8 @@
+V1.0.71
+     added support for file hyperlinks for aliases functions and scripts.
+     Terminals that support hyperlinks (iTerm2, Kitty, GNOME Terminal) will make it clickable.  on my system they open with gedit
+     Other terminals will just display the path normally.
+
 V1.0.70
       new heuristic threat assesment option  flag -t
       scans suid sgid and world writable directories 
