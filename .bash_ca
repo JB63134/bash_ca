@@ -141,7 +141,8 @@ ca() {
         -s|--sourced) printf "\n"; _ca_sourced_files; return 0;;
         -o|--overridden) printf "\n"; _ca_overridden; return 0;;
         -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;
-        -S|--scan) printf "\n"; _ca_display_scan; return 0;;
+        -S|--scan) printf "\n"; _ca_display_files_scan; return 0;;
+        -t|--threat) printf "\n"; _ca_display_sxid_scan; return 0;;
         -V|--verify)
             printf "\n"
             # Remove the -V/--verify argument
@@ -545,9 +546,6 @@ fi
         else                         printf "${CYAN}%.1f TB${RESET}\n" "$(echo "$size_bytes / 1099511627776" | bc -l)"
         fi
         
-        local shahash
-        shahash=$(sha256sum "$cmd_path" | awk '{print $1}' )
-        # printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$indent" "$shahash" 
         _ca_show_hash "$indent" "$cmd_path"
         # Root privilege detection
         local requires_root=0
@@ -750,9 +748,11 @@ _ca_usage() {
            -f --fzf            Use fzf to interactivly search for commands     
            -s --sourced        List all sourced files in the enviroment.
            -o --overridden     List all commands that override another command in the enviroment.
-           -p --path           list all directories in $PATH and highlight writable directories.
-           -S --scan           Scan for SUID and SGID binaries and World Writable directories.
-         
+           -p --path           List all directories in $PATH and highlight writable directories.
+           -S --scan           List SUID binaries, SGID binaries and World Writable directories.
+           -t --threat         Threat assesment scan of SUID/SGID binaries and World Writable directories.
+           -V --verify         Verify package integrity, supports dpkg rpm and pacman.
+           
      Examples:
            ca                   # Automatically analyzes your most recent command
            ca awk               # Analyzes 'awk'
@@ -768,7 +768,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.51 — Bash Command Analyzer
+     ca v1.0.70 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -1356,10 +1356,10 @@ _ca_builtin_override() {
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_display_scan
+# Function: _ca_display_files_scan
 # Purpose : scan for SUID / SGID binaries and World-Writable directories 
 #------------------------------------------------------------------------
-_ca_display_scan() {
+_ca_display_files_scan() {
     printf "=== SUID/SGID and W-W directories (Mode: -S) ===\n\n"
     _ca_suid_scan
     printf "\n"
@@ -1482,7 +1482,6 @@ _ca_split_top_level_commands() {
 
         # -----------------------------
         # QUOTE HANDLING
-        # -----------------------------
         if (( in_single )); then
             seg+="$c"
             [[ $c == "'" ]] && in_single=0
@@ -1511,7 +1510,6 @@ _ca_split_top_level_commands() {
 
         # -----------------------------
         # STRUCTURAL NESTING
-        # -----------------------------
         case "$c" in
             '(')
                 seg+="$c"
@@ -1536,7 +1534,6 @@ _ca_split_top_level_commands() {
 
         # -----------------------------
         # TOP LEVEL OPERATORS
-        # -----------------------------
         # Only if ALL nesting == 0
         if (( paren==0 && brace==0 && bracket==0 && !in_single && !in_double && !in_backtick )); then
 
@@ -1942,6 +1939,397 @@ _ca_show_hash() {
     esac
 
     [[ -n "$hash" ]] && printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$indent" "$hash"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_display_sxid_scan
+# Purpose : scan for SUID / SGID binaries and World-Writable directories 
+#------------------------------------------------------------------------
+_ca_display_sxid_scan() {
+    printf "=== SUID/SGID and W-W directories (Mode: -G) ===\n\n"
+    printf "├─ SUID Binaries (Identity Escalation)\n"
+    _ca_suid_threat_scan
+    printf "├─ SGID Binaries (Group Amplification)\n"
+    _ca_sgid_threat_scan
+    printf "├─ World-Writable Directories (Potential Injection Points)\n"
+    _ca_world_writable_scan
+    printf "\n================ End of list =================== \n"
+}
+
+
+#------------------------------------------------------------------------
+# Function: _ca_suid_threat_scan
+# Purpose : Scan for SUID gtfo risk binaries
+#------------------------------------------------------------------------
+_ca_suid_threat_scan() {
+    printf "├─ Scanning -- SUID threat assesment:\n"
+
+while IFS= read -r hit; do
+    _ca_threat_analyze_binary "$hit"
+done < <(find / -perm -4000 -type f 2>/dev/null)
+}
+
+declare -A THREAT_SIGS=(
+  # High confidence: trivial or near-trivial exploitation
+  [bash]="shell exec|high"
+  [sh]="shell exec|high"
+  [dash]="shell exec|high"
+  [find]="exec file-write|high"
+  [perl]="exec shell|high"
+  [python]="exec shell|high"
+  [nmap]="shell exec|high"
+  [socat]="shell exec|high"
+
+  # Medium confidence: common but situational
+  [env]="exec path-hijack|medium"
+  [awk]="exec|medium"
+  [sed]="file-write|medium"
+  [tar]="file-write|medium"
+  [openssl]="exec file-write|medium"
+  [tee]="file-write|medium"
+  [cp]="file-write|medium"
+  
+  # Low confidence: interactive / escape-based
+  [less]="shell file-read|low"
+  [more]="file-read|low"
+  [man]="shell|low"
+  [vi]="shell|low"
+  [vim]="shell file-read|low"
+  [ftp]="shell|low"
+)
+
+    #-----------------------------------------------------------
+    # Helper: _ca_threat_detect
+_ca_threat_detect() {
+    local bin="$1"
+    local sig prims confidence
+    local name
+
+    declare -A found=()
+    name=$(basename "$bin")
+    
+    case "$name" in
+        su|sudo|passwd|chsh|chfn|newgrp|gpasswd)
+        found[auth-impact]=1
+        ;;
+    esac
+
+    # ---- static signatures ----
+    if [[ -n "${THREAT_SIGS[$name]}" ]]; then
+        sig="${THREAT_SIGS[$name]}"
+        IFS='|' read -r prims confidence <<< "$sig"
+        for p in $prims; do
+            found["$p"]=1
+        done
+        [[ -n "$confidence" ]] && found["confidence:$confidence"]=1
+    fi
+
+    # ---- strings-based heuristics ----
+    local s
+    s=$(strings "$bin" 2>/dev/null)
+    
+    grep -qiE 'argv\[|getopt|getopt_long|scanf|fgets|gets' <<<"$s" && found[user-input]=1
+    grep -qiE 'system\(|execv|execl|popen' <<<"$s" && found[user-exec]=1
+    grep -qiE '\b(sh|bash|dash)\b' <<<"$s" && found[shell]=1
+    grep -qiE '\-exec\b|\-c\b|system\(' <<<"$s" && found[exec]=1
+    grep -qiE '\b(open|read|cat|less|more)\b' <<<"$s" && found[file-read]=1
+    grep -qiE '\b(write|output|tee|save)\b' <<<"$s" && found[file-write]=1
+    grep -qiE 'execvp|system|popen' <<<"$s" && ! grep -qiE 'clearenv|secure_path|setenv.*PATH' <<<"$s" &&
+        found[path-hijack]=1
+    grep -qiE 'EDITOR=|PAGER=|PATH=' <<<"$s" && found[env-inject]=1
+    grep -qiE 'set(res)?uid|seteuid|setreuid|setgid|setregid' <<<"$s" && found[priv-drop]=1
+    
+    if [[ -n "${found[priv-drop]}" ]]; then
+        # privilege-managed binaries
+        unset 'found[path-hijack]'
+        unset 'found[shell]'
+        unset 'found[exec]'
+    fi
+   
+    if [[ -n "${found[shell]}" && -z "${found[user-input]}" ]]; then
+        unset 'found[shell]'
+        found[shell-internal]=1
+    fi
+
+    if [[ -n "${found[exec]}" && -z "${found[user-input]}" ]]; then
+        unset 'found[exec]'
+        found[exec-internal]=1
+    fi
+
+    # ---- output ----
+for k in shell exec user-input auth-impact \
+         file-write path-hijack env-inject file-read \
+         confidence:high confidence:medium; do
+    [[ -n "${found[$k]}" ]] && printf "%s " "$k"
+done
+
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_threat_score
+_ca_threat_score() {
+    local prims="$1"
+    local score=0
+
+[[ $prims == *shell* && $prims == *user-input* ]] && ((score+=6))
+[[ $prims == *exec*  && $prims == *user-input* ]] && ((score+=5))
+[[ $prims == *file-write* ]] && ((score+=3))
+[[ $prims == *path-hijack* ]] && ((score+=3))
+[[ $prims == *env-inject* ]] && ((score+=2))
+[[ $prims == *file-read* ]] && ((score+=1))
+[[ $prims == *shell-internal* ]] && ((score+=1))
+[[ $prims == *exec-internal*  ]] && ((score+=1))
+[[ $prims == *confidence:high* ]]   && ((score+=2))
+[[ $prims == *confidence:medium* ]] && ((score+=1))
+[[ $prims == *auth-impact* ]] && ((score+=2))
+[[ $prims == *priv-drop* ]] && class="managed"
+    
+    echo "$score" "$class"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_threat_analyze_binary
+_ca_threat_analyze_binary() {
+    local bin="$1"
+    local prims score class
+
+    prims=$(_ca_threat_detect "$bin")
+    score=$(_ca_threat_score "$prims")
+
+    if [[ $score -ge 9 ]]; then
+        class="${RED}critical${RESET}"
+    elif [[ $score -ge 5 ]]; then
+        class="${YELLOW}interesting${RESET}"
+    elif [[ $score -ge 1 ]]; then
+        class="low"
+    else
+        class="none"
+    fi
+
+    printf "   ${CYAN}%s${RESET}\n" "$bin"
+    printf "       class: %s\n" "$class"
+    printf "       primitives: %s\n" "$prims"
+
+    if [[ $score -ge 9 ]]; then
+        printf "       risk score: ${RED}%s HIGH RISK – Requires review${RESET}\n\n" "$score"
+    elif [[ $score -ge 5 ]]; then
+        printf "       risk score: ${YELLOW}%s MEDIUM RISK – Potential concern${RESET}\n\n" "$score"
+    else
+        printf "       risk score: ${YELLOW}%s MEDIUM RISK – Review recommended${RESET}\n\n" "$score"
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_sgid_threat_scan
+# Purpose : Scan for SGID risk binaries
+#------------------------------------------------------------------------
+_ca_sgid_threat_scan() {
+    printf "├─ Scanning for SGID amplification risk:\n"
+
+    while IFS= read -r hit; do
+        _ca_sgid_threat_analyze_binary "$hit"
+    done < <(find / -perm -2000 -type f 2>/dev/null)
+}
+
+#-----------------------------------------------------------
+# Helper: _ca_sgid_threat_detect
+_ca_sgid_threat_detect() {
+    local bin="$1"
+    local sig prims confidence
+    local name
+
+    declare -A found=()
+    name=$(basename "$bin")
+
+    # ---- group-sensitive detection ----
+    local gid group
+    gid=$(stat -c %g "$bin")
+    group=$(getent group "$gid" | cut -d: -f1)
+
+    case "$group" in
+        shadow|adm|disk|docker|systemd-journal|utmp)
+            found[group-sensitive]=1
+            ;;
+    esac
+
+    # ---- strings heuristics (optional / SUID style) ----
+    local s
+    s=$(strings "$bin" 2>/dev/null)
+
+    grep -qiE 'argv\[|getopt|getopt_long|scanf|fgets|gets' <<<"$s" && found[user-input]=1
+    grep -qiE 'system\(|execv|execl|popen' <<<"$s" && found[user-exec]=1
+    grep -qiE '\b(sh|bash|dash)\b' <<<"$s" && found[shell]=1
+    grep -qiE '\b(open|read|cat|less|more)\b' <<<"$s" && found[file-read]=1
+    grep -qiE '\b(write|output|tee|save)\b' <<<"$s" && found[file-write]=1
+    grep -qiE 'EDITOR=|PAGER=|PATH=' <<<"$s" && found[env-inject]=1
+    grep -qiE 'setgid|setregid' <<<"$s" && found[priv-drop]=1
+
+    if [[ -n "${found[priv-drop]}" ]]; then
+        unset 'found[path-hijack]'
+        unset 'found[shell]'
+        unset 'found[exec]'
+    fi
+
+    [[ -n "${found[shell]}" && -z "${found[user-input]}" ]] && { unset 'found[shell]'; found[shell-internal]=1; }
+    [[ -n "${found[exec]}" && -z "${found[user-input]}" ]] && { unset 'found[exec]'; found[exec-internal]=1; }
+
+    # ---- output primitives ----
+    local key
+    local out=()
+
+    for key in shell exec user-input auth-impact file-write path-hijack env-inject file-read \
+           group-sensitive confidence:high confidence:medium; do
+        [[ -n "${found[$key]}" ]] && out+=("$key")
+    done
+
+    printf '%s ' "${out[@]}"
+    echo
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_sgid_threat_score
+_ca_sgid_threat_score() {
+    local prims="$1"
+    local score=0
+    local class=""
+
+    [[ $prims == *group-sensitive* ]] && ((score+=4))
+    [[ $prims == *file-write* ]] && ((score+=3))
+    [[ $prims == *file-read* ]] && ((score+=2))
+    [[ $prims == *auth-impact* ]] && ((score+=2))
+    [[ $prims == *env-inject* ]] && ((score+=1))
+    [[ $prims == *priv-drop* ]] && class="managed"
+
+    echo "$score" "$class"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_sgid_threat_analyze_binary
+_ca_sgid_threat_analyze_binary() {
+    local bin="$1"
+    local prims score class
+
+    prims=$(_ca_sgid_threat_detect "$bin")
+    score=$(_ca_sgid_threat_score "$prims")
+
+    if [[ $score -ge 9 ]]; then
+        class="${RED}amplification${RESET}"
+    elif [[ $score -ge 5 ]]; then
+        class="${YELLOW}interesting${RESET}"
+    elif [[ $score -ge 1 ]]; then
+        class="low"
+    else
+        class="none"
+    fi
+    
+    local gid group
+    gid=$(stat -c %g "$bin")
+    group=$(getent group "$gid" | cut -d: -f1)
+
+    printf "   ${CYAN}%s${RESET}\n" "$bin"
+    printf "       class: %s\n" "$class"
+    printf "       group: %s\n" "$group"
+    printf "       primitives: %s\n" "$prims"
+
+    if [[ $score -ge 8 ]]; then
+        printf "       risk score: ${RED}%s HIGH RISK${RESET}\n\n" "$score"
+    elif [[ $score -ge 5 ]]; then
+        printf "       risk score: ${YELLOW}%s MEDIUM RISK${RESET}\n\n" "$score"
+    else
+        printf "       risk score: %s\n\n" "$score"
+    fi
+}
+
+#-----------------------------------------------------------
+# Function: _ca_world_writable_scan
+# Purpose : Identify world-writable directories as injection surfaces
+#-----------------------------------------------------------
+_ca_world_writable_scan() {
+    local dir perms owner group prims score class
+
+    printf "├─ Scanning for World-Writable directories:\n"
+
+    # Limit to high-risk locations for speed, plus /var/tmp
+    local scan_dirs=("/tmp" "/var/tmp" "/run" "/dev/shm")
+    
+    for root in "${scan_dirs[@]}"; do
+        [ -d "$root" ] || continue
+        while IFS= read -r dir; do
+            prims=()
+            score=0
+
+            # permissions and ownership
+            perms=$(stat -c "%A" "$dir" 2>/dev/null)
+            owner=$(stat -c "%U" "$dir" 2>/dev/null)
+            group=$(stat -c "%G" "$dir" 2>/dev/null)
+
+            prims+=(world-writable)
+            ((score+=1))
+
+            # sticky bit
+            if [[ "$perms" == *t ]]; then
+                prims+=(sticky)
+            else
+                prims+=(no-sticky)
+                ((score+=3))
+            fi
+
+            # ownership
+            if [[ "$owner" == "root" ]]; then
+                prims+=(root-owned)
+                ((score+=1))
+            fi
+
+            # runtime vs persistent
+            case "$dir" in
+                /tmp|/run/*|/dev/shm*)
+                    prims+=(runtime-dir)
+                    ;;
+                /var/tmp*)
+                    prims+=(persistent)
+                    ((score+=2))
+                    ;;
+                *)
+                    prims+=(persistent)
+                    ((score+=2))
+                    ;;
+            esac
+
+            # path injection potential
+            case "$dir" in
+                /tmp|/var/tmp|/dev/shm)
+                    prims+=(path-inject)
+                    ((score+=1))
+                    ;;
+            esac
+
+            # symlink abuse potential
+            prims+=(symlink-attack)
+            ((score+=1))
+            
+# path injection potential
+if grep -qE "(^|:)$dir(:|$)" <<<"$PATH"; then
+    prims+=(path-inject)
+    ((score+=1))
+fi
+            # classification
+            if (( score >= 9 )); then
+                class="${RED}critical${RESET}"
+            elif (( score >= 3 )); then
+                class="${YELLOW}interesting${RESET}"
+            else
+                class="low"
+            fi
+
+            # Output
+            printf "   ${CYAN}%s${RESET}\n" "$dir"
+            printf "       owner: %s:%s\n" "$owner" "$group"
+            printf "       perms: %s\n" "$perms"
+            printf "       primitives: %s\n" "${prims[*]}"
+            printf "       risk score: %s (%s)\n\n" "$score" "$class"
+
+        done < <(find "$root" -type d -perm -0002 2>/dev/null | sort -u)
+    done
 }
 
 #------------------------------------------------------------------------
