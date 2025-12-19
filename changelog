@@ -1,3 +1,7 @@
+V1.0.70
+      new heuristic threat assesment option  flag -t
+      scans suid sgid and world writable directories 
+      
 V1.0.51
      new function to generate hashes of aliases functions binaries and scripts
 
