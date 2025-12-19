@@ -1946,7 +1946,7 @@ _ca_show_hash() {
 # Purpose : scan for SUID / SGID binaries and World-Writable directories 
 #------------------------------------------------------------------------
 _ca_display_sxid_scan() {
-    printf "=== SUID/SGID and W-W directories (Mode: -G) ===\n\n"
+    printf "=== SUID/SGID and W-W directories (Mode: -t) ===\n\n"
     printf "├─ SUID Binaries (Identity Escalation)\n"
     _ca_suid_threat_scan
     printf "├─ SGID Binaries (Group Amplification)\n"
