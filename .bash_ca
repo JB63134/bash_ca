@@ -143,6 +143,7 @@ ca() {
         -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;
         -S|--scan) printf "\n"; _ca_display_files_scan; return 0;;
         -t|--threat) printf "\n"; _ca_display_sxid_scan; return 0;;
+        -u|--userbins) printf "\n"; _ca_list_user_bin; return 0;;
         -V|--verify)
             printf "\n"
             # Remove the -V/--verify argument
@@ -2336,6 +2337,23 @@ fi
             printf "       risk score: %s (%s)\n\n" "$score" "$class"
 
         done < <(find "$root" -type d -perm -0002 2>/dev/null | sort -u)
+    done
+}
+
+#-----------------------------------------------------------
+# Function: _ca_list_user_bin
+# Purpose : Identify user writable commands/scripts/binaries
+#-----------------------------------------------------------
+_ca_list_user_bin() {
+    echo "=== User-writable commands ==="
+    _ca_restore_path
+    for dir in ${PATH//:/ }; do
+        [ -d "$dir" ] || continue
+        [[ "$dir" =~ ^/usr|^/bin ]] && continue
+        for f in "$dir"/*; do
+            [ -x "$f" ] || continue
+            echo "$(basename "$f") -> $f"
+        done
     done
 }
 
