@@ -11,12 +11,14 @@ case $- in
 esac
 
 # shellcheck disable=SC2034
-ca_needed_deps=(grep basename file find sed cut head readlink realpath awk ldd getcap perl)
+ca_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
 # shellcheck disable=SC2034
 ca_optional_deps=(tput fzf batcat bat dpkg rpm pacman)
 
 OLD_PATH="$PATH"
 
+declare -g CA_INDENT=""
+declare -g CA_MAX_DEPTH=8
 declare -g __CA_SOURCED_SCANNED=0
 declare -gA __CA_SOURCED_FILES_MAP=()    
 declare -ga __CA_SOURCED_FILES_LIST=()  
@@ -34,9 +36,8 @@ ca() {
     local fcmd cmd ctype cmd_path alias_expansion RED GREEN CYAN RESET 
     local depth=${2:-0}
     local cmdline="$*"
-    local MAX_DEPTH=8
-    local indent
-    indent=$(printf "%*s" $((depth * 4)) "")
+    
+    CA_INDENT=$(printf "%*s" $((depth * 4)) "")
     
     # -------------------------
     # Colors (tput → ANSI → none)
@@ -89,7 +90,7 @@ ca() {
         __CA_SEEN_BUILTINS=()
         __CA_SHADOW_SEEN=()
         __CA_VISITED=()
-   
+
         #--------------------------
         # Greeting
         #--------------------------
@@ -105,8 +106,8 @@ ca() {
     # -------------------------
     # Depth guard
     # -------------------------
-    (( depth > MAX_DEPTH )) && { 
-        printf "%s${RED}Max recursion depth (%d) reached${RESET}\n" "$indent" "$MAX_DEPTH"
+    (( depth > CA_MAX_DEPTH )) && { 
+        printf "%s${RED}Max recursion depth (%d) reached${RESET}\n" "$CA_INDENT" "$CA_MAX_DEPTH"
         return 1 
     }
     
@@ -117,7 +118,7 @@ ca() {
         read -r -a fcmd <<< "$1"
     else
         read -r -a fcmd <<< "$(fc -ln -1)" || { 
-            printf "%s    ↳ ${RED}Failed to get last command${RESET}\n" "$indent"
+            printf "%s    ↳ ${RED}Failed to get last command${RESET}\n" "$CA_INDENT"
             return 1
         }
     fi
@@ -128,36 +129,53 @@ ca() {
     # -------------------------------------------------------------------------
     
     local fzffound=0
+    local verbose=0
+    local pick
     if command -v fzf &>/dev/null; then
         fzffound=1
     fi
-    local ocmd
-    read -r -a ocmd <<< "$(fc -ln -1)"
-    cmd0="${ocmd[0]}"
     
     case "$cmd" in
         -h|--help) _ca_usage; return 0;;
         -v|--version) _ca_ver; return 0;;
-        -s|--sourced) printf "\n"; _ca_sourced_files; return 0;;
-        -o|--overridden) printf "\n"; _ca_overridden; return 0;;
-        -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;
-        -S|--scan) printf "\n"; _ca_display_files_scan; return 0;;
-        -t|--threat) printf "\n"; _ca_display_sxid_scan; return 0;;
-        -u|--userbins) printf "\n"; _ca_list_user_bin; return 0;;
-        -V|--verify)
-            printf "\n"
-            # Remove the -V/--verify argument
-            shift 1
-            # Optional: check if user supplied a command or file
-            if [[ -n $1 ]]; then
-            _ca_verify_package "$1"
+        -a|--aliases) 
+            if (( fzffound == 1 )); then 
+                local pick
+                pick=$(compgen -A alias | sort -u | fzf --prompt="Select an alias: ")
+                [[ -n "$pick" ]] || return 1
+                ca "$pick"
+                return 0
             else
-            # If no argument, verify the last analyzed command (or current $CMD)
-            _ca_verify_package "$cmd0"
+                printf "\n"
+                _ca_aliases
+                return 0
             fi
-            return 0
             ;;
-        -f|--fzf)
+        -f|--functions|-fv|--funverb)
+           if [[ "$cmd" == "-fv" || "$cmd" == "--funverb" ]]; then
+               verbose=1
+           fi
+           if (( fzffound == 1 )); then
+             if (( verbose == 1 )); then
+                 pick=$(compgen -A function | sort -u | fzf --prompt="Select a function: ")
+             else
+                 pick=$(compgen -A function | grep -Ev '^(__|_|_comp|_python_)' | sort -u | fzf --prompt="Select a function: ")
+             fi
+             [[ -n "$pick" ]] || return 1
+             ca "$pick"
+           else
+             printf "\n"
+             _ca_function  # fallback to normal list
+           fi              
+           return 0
+           ;;
+        -s|--sourced) printf "\n"; _ca_sourced_files; return 0;;
+        
+        -S|--scan) printf "\n"; _ca_display_files_scan; return 0;;
+        -o|--overridden) printf "\n"; _ca_overridden; return 0;;
+        -t|--trace) shift; cmd="$1"; _ca_print_trace "$cmd"; return 0;;
+        -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;
+        --fzf)
             if (( fzffound == 1 )); then 
                 local pick
                 pick=$(compgen -A function -A alias -A builtin -A command | sort -u | fzf --prompt="Get help for: ")
@@ -165,7 +183,7 @@ ca() {
                 ca "$pick"
                 return 0
             else
-                printf "%s    ↳ ${YELLOW}fzf is not installed.${RESET}\n" "$indent"
+                printf "%s    ↳ ${YELLOW}fzf is not installed.${RESET}\n" "$CA_INDENT"
                 printf "\n"
                 _ca_usage;
                 return 0
@@ -178,9 +196,9 @@ ca() {
     # it will spam the screen with itself
     # -------------------------------------------------------------------------
     if [[ "$cmd" == "ca" ]]; then
-            printf "%s├─ Do you speak spanish?\n" "$indent"
-            printf "%s├─ Detected ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
-            printf "%s    ↳ Showing  ${CYAN}'%s --help'${RESET}:\n\n"  "$indent" "$cmd"
+            printf "%s├─ Do you speak spanish?\n" "$CA_INDENT"
+            printf "%s├─ Detected ${CYAN}'%s' ${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Showing  ${CYAN}'%s --help'${RESET}:\n\n"  "$CA_INDENT" "$cmd"
             _ca_usage
             return 0
     fi
@@ -189,10 +207,10 @@ ca() {
     # Handle Edge case that fails with type. catch it here to avoid a crash later.
     # ------------------------------------------------------------------------- 
     if [[ "$cmd" == "]" ]]; then
-        printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
-        printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$indent" "$cmd"
-        printf "%s    ↳ Definition:\n\n" "$indent"
-        printf "%s          ${CYAN}%s${RESET} -- Ends a conditional test expression.\n" "$indent" "$cmd"
+        printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+        printf "%s          ${CYAN}%s${RESET} -- Ends a conditional test expression.\n" "$CA_INDENT" "$cmd"
         return 0
     fi
     
@@ -204,77 +222,77 @@ ca() {
 
     case "$cmd" in
         "&&")
-            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Logical AND: %s ${CYAN}'%s'${RESET} %s\n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          Runs %s only if %s succeeds (exit status 0).\n\n" "$indent" "$cmd2" "$cmd1"
+            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Logical AND: %s ${CYAN}'%s'${RESET} %s\n" "$CA_INDENT" "$cmd1" "$cmd" "$cmd2"
+            printf "%s          Runs %s only if %s succeeds (exit status 0).\n\n" "$CA_INDENT" "$cmd2" "$cmd1"
             return 0
             ;;
         "||")
-            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Logical OR: %s ${CYAN}'%s'${RESET} %s\n" "$indent" "$cmd1" "$cmd" "$cmd2"
-            printf "%s          Runs %s only if %s fails (non-zero exit status).\n\n" "$indent" "$cmd2" "$cmd1"
+            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Logical OR: %s ${CYAN}'%s'${RESET} %s\n" "$CA_INDENT" "$cmd1" "$cmd" "$cmd2"
+            printf "%s          Runs %s only if %s fails (non-zero exit status).\n\n" "$CA_INDENT" "$cmd2" "$cmd1"
             return 0            
             ;;
         "&")
-            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET} (background)\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Runs %s in the background.\n\n" "$indent" "$cmd1"
+            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET} (background)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Runs %s in the background.\n\n" "$CA_INDENT" "$cmd1"
             return 0            
             ;;
         "|")
-            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Sends stdout of %s to stdin of %s.\n\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Sends stdout of %s to stdin of %s.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
             return 0 
             ;;
         "|&")
-            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET} (stderr+stdout)\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Sends both stdout and stderr of %s to stdin of %s.\n\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET} (stderr+stdout)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Sends both stdout and stderr of %s to stdin of %s.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
             return 0 
             ;;
         ";")
-            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET} (sequence)\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Run %s, then run %s regardless of success/failure.\n\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET} (sequence)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Run %s, then run %s regardless of success/failure.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
             return 0 
             ;;
         "<")
-            printf "%s├─ Detected input redirection ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Reads input of %s from %s instead of stdin.\n\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s├─ Detected input redirection ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Reads input of %s from %s instead of stdin.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
             return 0 
             ;;
         ">")
-            printf "%s├─ Detected output redirection ${CYAN}'%s'${RESET} (overwrite)\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Redirects stdout of %s to %s (overwrite file).\n\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s├─ Detected output redirection ${CYAN}'%s'${RESET} (overwrite)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Redirects stdout of %s to %s (overwrite file).\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
             return 0 
             ;;
         ">>")
-            printf "%s├─ Detected output redirection ${CYAN}'%s'${RESET} (append)\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Redirects stdout of %s to %s (append to file).\n\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s├─ Detected output redirection ${CYAN}'%s'${RESET} (append)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Redirects stdout of %s to %s (append to file).\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
             return 0 
             ;;
         "2>")
-            printf "%s├─ Detected stderr redirection ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Redirects stderr of %s to %s.\n\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s├─ Detected stderr redirection ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Redirects stderr of %s to %s.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
             return 0 
             ;;
         "&>")
-            printf "%s├─ Detected stdout+stderr redirection ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Redirects both stdout and stderr of %s to %s.\n\n" "$indent" "$cmd1" "$cmd2"
+            printf "%s├─ Detected stdout+stderr redirection ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Redirects both stdout and stderr of %s to %s.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
             return 0 
             ;;
         "<<<")
-            printf "%s├─ Detected here-string ${CYAN}'%s'${RESET}\n" "$indent" "$cmd"
-            printf "%s    ↳ Definition:\n\n" "$indent"
-            printf "%s          Passes a string directly as stdin to %s.\n\n" "$indent" "$cmd2"
+            printf "%s├─ Detected here-string ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Passes a string directly as stdin to %s.\n\n" "$CA_INDENT" "$cmd2"
             return 0 
             ;;
     esac
@@ -292,7 +310,7 @@ ca() {
             _ca_parse_commands "$seg" subcmds
 
             for c in "${subcmds[@]}"; do
-                printf "%s${CYAN}↳ Subcommand:${RESET} %s\n" "$indent" "$c"
+                printf "%s${CYAN}↳ Subcommand:${RESET} %s\n" "$CA_INDENT" "$c"
                 ca "$c" $((depth + 1))
             done
         done
@@ -304,18 +322,18 @@ ca() {
     # -------------------------------------------------------------------------
     ctype=$(type -t -- "$cmd" 2>/dev/null)
     if [[ -z "$ctype" ]]; then
-        printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$indent" "$cmd"
-        printf "%s    ↳ Check your spelling and try again\n\n" "$indent" 
+        printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Check your spelling and try again\n\n" "$CA_INDENT" 
         return 1
     fi
 
     # -------------------------------------------------------------------------
     # Handle keywords and provide help statements
     # -------------------------------------------------------------------------
-declare -A __H_KEYWORD_DESC=(
-    [then]="Part of an if statment - Begins the command block for a true condition." 
-    [else]="Part of an if statment - Begins the command block if the condition is false." 
-    [elif]="Part of an if statment - Introduces a new condition if the previous one is false." 
+declare -A __CA_KEYWORD_DESC=(
+    [then]="Part of an if statement - Begins the command block for a true condition." 
+    [else]="Part of an if statement - Begins the command block if the condition is false." 
+    [elif]="Part of an if statement - Introduces a new condition if the previous one is false." 
     [fi]="Ends an if statement."
     [do]="Begins the body of a loop or conditional block."
     [done]="Ends the body of a loop or conditional block." 
@@ -327,15 +345,15 @@ declare -A __H_KEYWORD_DESC=(
 )
 
 if [[ $ctype == keyword ]]; then
-    printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
+    printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$CA_INDENT" "$cmd"
 
     if help "$cmd" &>/dev/null; then
-        printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
+        printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$CA_INDENT" "$cmd"
         help "$cmd" 2>/dev/null | sed 's/^/    /'
-    elif [[ -n "${__H_KEYWORD_DESC[$cmd]}" ]]; then
-        printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$indent" "$cmd"
-        printf "%s    ↳ Definition:\n\n" "$indent"
-        printf "%s          ${CYAN}%s${RESET} -- %s\n" "$indent" "$cmd" "${__H_KEYWORD_DESC[$cmd]}"
+    elif [[ -n "${__CA_KEYWORD_DESC[$cmd]}" ]]; then
+        printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+        printf "%s          ${CYAN}%s${RESET} -- %s\n" "$CA_INDENT" "$cmd" "${__CA_KEYWORD_DESC[$cmd]}"
     fi
     return 0
 fi
@@ -344,14 +362,14 @@ fi
     # Builtins
     # -------------------------------------------------------------------------
     if [[ "$ctype" == "builtin" ]]; then
-        printf "%s├─ ${CYAN}'%s'${RESET} is a shell builtin\n" "$indent" "$cmd"
+        printf "%s├─ ${CYAN}'%s'${RESET} is a shell builtin\n" "$CA_INDENT" "$cmd"
 
         # Enabled/disabled
         local enabled_state="enabled"
         if enable -p 2>/dev/null | grep -qE "^-n ${cmd}\b"; then
             enabled_state="disabled"
         fi
-        printf "%s    ↳ Status: Shell builtin is ${CYAN}%s${RESET}\n" "$indent" "$enabled_state"
+        printf "%s    ↳ Status: Shell builtin is ${CYAN}%s${RESET}\n" "$CA_INDENT" "$enabled_state"
 
         # Loadable builtins
         local origin="Core Bash builtin"
@@ -364,11 +382,11 @@ fi
             fi
         done < <(enable -a | grep '^enable -f ' || true)
 
-        printf "%s    ↳ Source:  ${CYAN}%s${RESET}\n" "$indent" "$origin"
+        printf "%s    ↳ Source:  ${CYAN}%s${RESET}\n" "$CA_INDENT" "$origin"
 
         # Show help
-        printf "%s    ↳ Showing ${CYAN}'help %s'${RESET}:\n\n" "$indent" "$cmd"
-        help "$cmd" 2>/dev/null | sed "s/^/$indent        /"
+        printf "%s    ↳ Showing ${CYAN}'help %s'${RESET}:\n\n" "$CA_INDENT" "$cmd"
+        help "$cmd" 2>/dev/null | sed "s/^/$CA_INDENT        /"
 
         # Recurse
         local nextcmd=("${fcmd[@]:1}")
@@ -398,25 +416,25 @@ fi
         (( !was_extdebug )) && shopt -u extdebug  # Restore extdebug state if we enabled it
         #---------------------------- 
         
-        printf "%s├─ ${CYAN}'%q' ${RESET}is a shell function\n" "$indent" "$cmd"
+        printf "%s├─ ${CYAN}'%q' ${RESET}is a shell function\n" "$CA_INDENT" "$cmd"
         
 
  found_location=$(printf "\e]8;;file://%s\a%s\e]8;;\a" "$file" "$file")
         
         
         if [[ "$file" == "main" ]]; then
-            printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$indent"
+            printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$CA_INDENT"
         else
-            printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$found_location" "$line"
+            printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$CA_INDENT" "$found_location" "$line"
         fi
-        _ca_show_hash "$indent" "$cmd"
-        printf "%s    ↳ Showing preview of function: ${CYAN}%s${RESET}\n\n"  "$indent" "$cmd"     
+        _ca_show_hash "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Showing preview of function: ${CYAN}%s${RESET}\n\n"  "$CA_INDENT" "$cmd"     
            
         local func_content
         func_content=$(declare -f "$cmd")
-        _ca_highlight_script "$func_content" "$indent" "$file" "$line"
+        _ca_highlight_script "$func_content" "$CA_INDENT" "$file" "$line"
         
-        printf "\n%s    ======= End of function preview =======\n" "$indent"   
+        printf "\n%s    ======= End of function preview =======\n" "$CA_INDENT"   
         return 0
     fi
     
@@ -436,8 +454,8 @@ fi
         alias_expansion=$(_ca_expand_vars "$alias_expansion")
         alias_def=$(alias "$cmd")
         
-        printf "%s├─ ${CYAN}'%s' ${RESET}is an alias:\n" "$indent" "$cmd"
-        printf "%s    ↳ Resolves to: ${CYAN}%s${RESET}\n" "$indent" "$alias_def"
+        printf "%s├─ ${CYAN}'%s' ${RESET}is an alias:\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Resolves to: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$alias_def"
     
         # Show where alias is defined
         local found_location=""
@@ -459,16 +477,16 @@ fi
              if grep -qE "^[[:space:]]*alias[[:space:]]+${cmd}=" "$file"; then
  found_location=$(printf "\e]8;;file://%s\a%s\e]8;;\a" "$file" "$file")
                 line_number=$(grep -nE "^[[:space:]]*alias[[:space:]]+$cmd=" "$file" | head -n1 | cut -d: -f1)
-                printf "%s    ↳ Defined in: ${CYAN}%s (line %s)${RESET}\n" "$indent" "$found_location" "$line_number"
+                printf "%s    ↳ Defined in: ${CYAN}%s (line %s)${RESET}\n" "$CA_INDENT" "$found_location" "$line_number"
              fi
         done
         (( !nullglob_was )) && shopt -u nullglob  # Restore nullglob state if we enabled it
         #-----------------------------------------------------
         
         if [[ -z "$found_location" ]]; then
-            printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$indent"
+            printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$CA_INDENT"
         fi     
-        _ca_show_hash "$indent" "$cmd"
+        _ca_show_hash "$CA_INDENT" "$cmd"
         # Handle alias expansion with chain/pipeline parsing
         if [[ "$alias_expansion" =~ [\|\&\;] ]]; then
             local segments=()
@@ -479,7 +497,7 @@ fi
                 _ca_parse_commands "$seg" subcmds
 
                 for c in "${subcmds[@]}"; do
-                    printf "%s${BPURP}    ↳ Alias subcommand:${RESET} %s\n" "$indent" "$c"
+                    printf "%s${BPURP}    ↳ Alias subcommand:${RESET} %s\n" "$CA_INDENT" "$c"
                     ca "$c" $((depth + 1))
                 done
             done
@@ -495,7 +513,7 @@ fi
                     __CA_VISITED["$primary"]=1
                     ca "$primary" $((depth + 1))
                 else
-                    printf "%s    ↳ ${CYAN}%s${RESET} already visited — possible cycle\n" "$indent" "$primary"
+                    printf "%s    ↳ ${CYAN}%s${RESET} already visited — possible cycle\n" "$CA_INDENT" "$primary"
                 fi
             else
                 ca "$alias_expansion" $((depth + 1))
@@ -521,23 +539,23 @@ fi
               s/, BuildID/\\\nBuildID/g; 
               s/, for /\\\nfor /g')
 
-        printf "%s├─ ${CYAN}'%s' ${RESET}is an external command\n" "$indent" "$cmd"
-        printf "%s    ↳ Path: ${CYAN}%s${RESET}\n" "$indent" "$cmd_path"
+        printf "%s├─ ${CYAN}'%s' ${RESET}is an external command\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Path: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$cmd_path"
 
         # Detect symbolic link
         if [[ "$cmd_real" != "$cmd_path" ]]; then
-            printf "%s    ↳ ${YELLOW}Symbolic link ${RESET}to: ${YELLOW}%s${RESET}\n" "$indent" "$cmd_real"
+            printf "%s    ↳ ${YELLOW}Symbolic link ${RESET}to: ${YELLOW}%s${RESET}\n" "$CA_INDENT" "$cmd_real"
             cmd_path="$cmd_real"
-            printf "%s    ↳ Now Examining: ${BPURP}%s${RESET}\n" "$indent" "$cmd_real"
+            printf "%s    ↳ Now Examining: ${BPURP}%s${RESET}\n" "$CA_INDENT" "$cmd_real"
         fi
         
         local base
         base=$(basename "$cmd_real")
-        _ca_show_shadowing "$base" "$cmd_real"
+        _ca_show_path_alternates "$base" "$cmd_real"
         
         local size_bytes
         size_bytes=$(stat -c %s "$cmd_path")
-        printf "%s    ↳ File Size: " "$indent" 
+        printf "%s    ↳ File Size: " "$CA_INDENT" 
 
         local kib=1024
         local mib=$((1024 * 1024))
@@ -551,7 +569,7 @@ fi
         else                         printf "${CYAN}%.1f TB${RESET}\n" "$(echo "$size_bytes / 1099511627776" | bc -l)"
         fi
         
-        _ca_show_hash "$indent" "$cmd_path"
+        _ca_show_hash "$CA_INDENT" "$cmd_path"
         # Root privilege detection
         local requires_root=0
         local root_reason=""
@@ -590,12 +608,12 @@ fi
         fi
         
         if (( requires_root )); then
-            printf "%s    ↳ Requires root privileges: ${YELLOW}%s${RESET}\n" "$indent" "$root_reason"
+            printf "%s    ↳ Requires root privileges: ${YELLOW}%s${RESET}\n" "$CA_INDENT" "$root_reason"
         fi
         
         # Executable Type
         if grep -qiE 'script|text executable' <<< "$file_info"; then
-            printf "%s    ↳ Executable Type: ${CYAN}Script / Text executable${RESET}\n" "$indent"
+            printf "%s    ↳ Executable Type: ${CYAN}Script / Text executable${RESET}\n" "$CA_INDENT"
             local first_line interp
             first_line=$(head -n1 "$cmd_path")
 
@@ -605,49 +623,53 @@ fi
             fi
 
             while IFS= read -r line; do
-                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$line"
             done <<< "$formatted_type"
 
-            printf "%s    ↳ Interpreter: ${CYAN}%s${RESET}\n" "$indent" "$interp"
+            printf "%s    ↳ Interpreter: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$interp"
 
         elif grep -qi 'ELF' <<< "$file_info"; then
             if grep -qi 'statically linked' <<< "$file_info"; then
-                printf "%s    ↳ Executable Type: ELF binary - Statically linked\n" "$indent"
+                printf "%s    ↳ Executable Type: ELF binary - Statically linked\n" "$CA_INDENT"
             else
-                printf "%s    ↳ Executable Type: ELF binary - Dynamically linked\n" "$indent"
+                printf "%s    ↳ Executable Type: ELF binary - Dynamically linked\n" "$CA_INDENT"
             fi
 
             while IFS= read -r line; do
-                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$line"
             done <<< "$formatted_type"
 
         else
-            printf "%s    ↳ Executable Type: Unknown\n" "$indent"
+            printf "%s    ↳ Executable Type: Unknown\n" "$CA_INDENT"
             while IFS= read -r line; do
-                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$line"
             done <<< "$formatted_type"
-            printf "%s    ⎟       ${YELLOW}%s${RESET}\n" "$indent" "$file_info"
+            printf "%s    ⎟       ${YELLOW}%s${RESET}\n" "$CA_INDENT" "$file_info"
         fi
 
         # Dependencies (ELF only)
-        local deps
-        deps=$(ldd "$cmd_path" 2>/dev/null | sed 's/^[[:space:]]*//')
+        local deps=""
+        
+        if grep -qi ELF <<< "$file_info"; then
+            deps=$(ldd "$cmd_path" 2>/dev/null | sed 's/^[[:space:]]*//')
+        fi
+        
         if [[ -n "$deps" ]]; then
-            printf "%s    ↳ Dependencies:\n" "$indent"
+            printf "%s    ↳ Dependencies:\n" "$CA_INDENT"
             local unmet_found=0
             while IFS= read -r line; do
                 if [[ "$line" =~ "not found" ]]; then
                     unmet_found=1
-                    printf "%s    ⎟    ${RED}%s${RESET}\n" "$indent" "$line"
+                    printf "%s    ⎟    ${RED}%s${RESET}\n" "$CA_INDENT" "$line"
                 else
-                    printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$indent" "$line"
+                    printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$line"
                 fi
             done <<< "$deps"
-            (( unmet_found )) && printf "%s        ↳ ${RED}Some dependencies are missing!${RESET}\n" "$indent"
+            (( unmet_found )) && printf "%s        ↳ ${RED}Some dependencies are missing!${RESET}\n" "$CA_INDENT"
         fi
 
 # Package info
-_ca_lookup_package "$cmd_path" "$indent"
+_ca_lookup_package "$cmd_path" "$CA_INDENT"
         
         # Permissions
         if [[ -x "$cmd_path" ]]; then
@@ -686,14 +708,14 @@ _ca_lookup_package "$cmd_path" "$indent"
 
             # Output
             printf "%s    ↳ Permissions: %s%s%s (octal: %s%s%s)  %s%s%s\n" \
-                "$indent" "$risk_color" "$perms" "$RESET" \
+                "$CA_INDENT" "$risk_color" "$perms" "$RESET" \
                 "$risk_color" "$octal" "$RESET" "$risk_color" "$sid" "$RESET"
 
             printf "%s    ⎟    ↳ Owner/Group: ${CYAN}%s${RESET}\n" \
-                "$indent" "$owner_grp"
+                "$CA_INDENT" "$owner_grp"
 
             printf "%s    ⎟    ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" \
-                "$indent" "$owner_perm" "$group_perm" "$other_perm"
+                "$CA_INDENT" "$owner_perm" "$group_perm" "$other_perm"
         fi
        
         local crtime ctime mtime atime
@@ -703,11 +725,11 @@ _ca_lookup_package "$cmd_path" "$indent"
         mtime=$(stat -c %y -- "$cmd_path")
         atime=$(stat -c %x -- "$cmd_path")
         
-        printf "%s    ↳ Timestamps:\n" "$indent"
-        printf "%s    ⎟    ↳ File created (crtime): ${CYAN}%s${RESET}\n" "$indent" "$crtime"
-        printf "%s    ⎟    ↳ Last status change (ctime): ${CYAN}%s${RESET}\n" "$indent" "$ctime" 
-        printf "%s    ⎟    ↳ Last modified (mtime): ${CYAN}%s${RESET}\n" "$indent" "$mtime"   
-        printf "%s    ⎟    ↳ Last accessed (atime): ${CYAN}%s${RESET}\n" "$indent" "$atime"         
+        printf "%s    ↳ Timestamps:\n" "$CA_INDENT"
+        printf "%s    ⎟    ↳ File created (crtime): ${CYAN}%s${RESET}\n" "$CA_INDENT" "$crtime"
+        printf "%s    ⎟    ↳ Last status change (ctime): ${CYAN}%s${RESET}\n" "$CA_INDENT" "$ctime" 
+        printf "%s    ⎟    ↳ Last modified (mtime): ${CYAN}%s${RESET}\n" "$CA_INDENT" "$mtime"   
+        printf "%s    ⎟    ↳ Last accessed (atime): ${CYAN}%s${RESET}\n" "$CA_INDENT" "$atime"         
 
         local perlfound=0
         if command -v perl &>/dev/null; then
@@ -719,18 +741,18 @@ _ca_lookup_package "$cmd_path" "$indent"
      
         # Dump script content
         if grep -qiE 'script|text executable' <<< "$file_info"; then
-            printf "%s    ↳ Showing preview of script ${CYAN}'%s'${RESET}: %s\n" "$indent" "$found_location"
+            printf "%s    ↳ Showing preview of script ${CYAN}'%s'${RESET}: %s\n" "$CA_INDENT" "$found_location"
             if (( perlfound == 0 )); then 
-                printf "%s    ↳ ${YELLOW}Optional dependency 'perl' missing — syntax highlighting reduced${RESET}\n" "$indent" 
+                printf "%s    ↳ ${YELLOW}Optional dependency 'perl' missing — syntax highlighting reduced${RESET}\n" "$CA_INDENT" 
             fi           
             if [[ -r "$cmd_path" ]]; then
                 printf "\n"
-                _ca_highlight_script "$cmd_path" "$indent" " " " "
-                printf "\n%s    ========== End of script preview ========= \n" "$indent"
+                _ca_highlight_script "$cmd_path" "$CA_INDENT" " " " "
+                printf "\n%s    ========== End of script preview ========= \n" "$CA_INDENT"
             fi
             return 0
         else
-            printf "%s    └──────────────────────────────────────────\n\n" "$indent"
+            printf "%s    └──────────────────────────────────────────\n\n" "$CA_INDENT"
         fi
         local next_cmd=("${fcmd[@]:1}")
         if (( ${#next_cmd[@]} > 0 )); then
@@ -776,7 +798,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.71 — Bash Command Analyzer
+     ca v1.0.72 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -898,10 +920,9 @@ _ca_expand_vars() {
 # Purpose: Recursively scan .bashrc for ALL files that are sourced. including conditionals.
 #------------------------------------------------------------------------
 _ca_sourcedtree() {
-    local file files depth max_depth
+    local file files depth 
     depth=0
-    max_depth="${MAX_DEPTH:-5}"
-    files=("$BASH_ENV")
+    [[ -n "$BASH_ENV" && -f "$BASH_ENV" ]] && files+=("$BASH_ENV")
 
 if shopt -q login_shell; then
     [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
@@ -943,7 +964,7 @@ else
 fi  
   
     for file in "${files[@]}"; do
-        _ca_sourcedtree_single "$file" "$depth" "$max_depth"
+        _ca_sourcedtree_single "$file" "$depth" "$CA_MAX_DEPTH"
     done
 }
 
@@ -952,8 +973,7 @@ fi
 _ca_sourcedtree_single() {
     local file="$1"
     local depth="${2:-0}"
-    local max_depth="${3:-5}"
-    (( depth > max_depth )) && return
+    (( depth > CA_MAX_DEPTH )) && return
 
 # Expand path
 local expanded
@@ -978,7 +998,7 @@ __CA_SOURCED_FILES_LIST+=("$expanded")
         if [[ $line =~ ^[[:space:]]*(source|\.)[[:space:]]+(.+) ]]; then
             for f in ${BASH_REMATCH[2]}; do
                 f=$(_ca_expand_path "$f")
-                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
+                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$CA_MAX_DEPTH"
             done
             continue
         fi
@@ -996,7 +1016,7 @@ __CA_SOURCED_FILES_LIST+=("$expanded")
             # Check if left is [[ -f FILE ]] and right is source FILE
             if [[ $left =~ \[\[[[:space:]]*-f[[:space:]]+([^]]+)\]\] ]] && [[ $right =~ ^source[[:space:]]+(.+) ]]; then
                 f=$(_ca_expand_path "${BASH_REMATCH[1]}")
-                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
+                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$CA_MAX_DEPTH"
             fi
             continue
         fi
@@ -1005,7 +1025,7 @@ __CA_SOURCED_FILES_LIST+=("$expanded")
         if [[ $line =~ ^[[:space:]]*for[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+in[[:space:]]+(.+) ]]; then
             for f in ${BASH_REMATCH[1]}; do
                 f=$(_ca_expand_path "$f")
-                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
+                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$CA_MAX_DEPTH"
             done
             continue
         fi
@@ -1034,8 +1054,8 @@ then
         # Reject anything remotely executable
         [[ $f =~ [\$\`\;\&\|] ]] && continue
 
-        f=$(_h_expand_path "$f")
-        [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
+        f=$(_ca_expand_path "$f")
+        [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$CA_MAX_DEPTH"
     done
 fi
 
@@ -1082,11 +1102,11 @@ _ca_ensure_sourcedtree() {
 
 #------------------------------------------------------------------------
 # Function: _ca_highlight_script   # _ca_highlight_script "$path-to-script" "<blankspaces>"
-# Purpose: Modular syntax highlighting with indentation based on string in $2
+# Purpose: Modular syntax highlighting with CA_INDENTation based on string in $2
 #------------------------------------------------------------------------
 _ca_highlight_script() {
     local input="$1"
-    local indent="    "
+    local CA_INDENT="    "
     local file="$3"
     local line="$4"
    
@@ -1124,22 +1144,22 @@ fi
 if [[ -n "$bat_pager" ]]; then
     if [[ -f "$input" ]]; then
         "$bat_pager" --color=always --paging=never --line-range :50 --file-name "$input" "$input" \
-        | sed "s/^/$indent/"
+        | sed "s/^/$CA_INDENT/"
     else
         # Input is literal text → use process substitution
         printf "%s" "$code" \
         | "$bat_pager" --color=always --language bash --paging=never --line-range :50 --file-name "$header" - \
-        | sed "s/^/$indent/"
+        | sed "s/^/$CA_INDENT/"
     fi
     return
 fi
 
-    perl - "$code" "$indent" <<'PERL_CODE'
+    perl - "$code" "$CA_INDENT" <<'PERL_CODE'
 use strict;
 use warnings;
 
 my $content = $ARGV[0];
-my $indent = $ARGV[1] // "";
+my $CA_INDENT = $ARGV[1] // "";
 
 # ANSI colors
 my %C = (
@@ -1173,15 +1193,15 @@ my @patterns = (
 );
 
 sub highlight {
-    my ($line, $indent) = @_;
+    my ($line, $CA_INDENT) = @_;
     foreach my $p (@patterns) {
         $line =~ s/($p->{regex})/$C{$p->{color}}$1$C{reset}/g;
     }
-    return $indent . $line;
+    return $CA_INDENT . $line;
 }
 
 for my $line (split /\n/, $content) {
-    print highlight($line, $indent), "\n";
+    print highlight($line, $CA_INDENT), "\n";
 }
 PERL_CODE
 }
@@ -1244,7 +1264,7 @@ _ca_alias_override() {
     local acmd list akind
     local flag=0
     
-    printf "%s├─ Examining aliases to detect overridden commands:\n" "$indent"
+    printf "%s├─ Examining aliases to detect overridden commands:\n" "$CA_INDENT"
 
     while IFS= read -r acmd; do
         mapfile -t list < <(type -at "$acmd")
@@ -1261,17 +1281,17 @@ _ca_alias_override() {
         for akind in "${uniq[@]}"; do
             case "$akind" in
                 builtin)
-                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$indent" "$acmd"
+                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$CA_INDENT" "$acmd"
                     flag=1 ;;
                 file)
-                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$indent" "$acmd"
+                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$CA_INDENT" "$acmd"
                     flag=1 ;;
             esac
         done
     done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
 
     if (( flag == 0 )); then
-        printf "%s    ↳ ${CYAN}No command or builtin is overridden.${RESET}\n" "$indent"
+        printf "%s    ↳ ${CYAN}No command or builtin is overridden.${RESET}\n" "$CA_INDENT"
     fi
 }
 
@@ -1283,7 +1303,7 @@ _ca_function_override() {
     local funcmd kind kinds 
     local func_flag=0
 
-    printf "%s├─ Examining functions to detect overridden commands:\n" "$indent"
+    printf "%s├─ Examining functions to detect overridden commands:\n" "$CA_INDENT"
 
     # Get list of function names
     while read -r funcmd; do
@@ -1292,19 +1312,19 @@ _ca_function_override() {
         for kind in "${kinds[@]}"; do
             case "$kind" in
                 alias)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides an alias of the same name.\n" "$indent" "$funcmd"
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides an alias of the same name.\n" "$CA_INDENT" "$funcmd"
                     func_flag=1
                     ;;
                 keyword)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} conflicts with a shell keyword of the same name (keyword takes precedence).\n" "$indent" "$funcmd"
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} conflicts with a shell keyword of the same name (keyword takes precedence).\n" "$CA_INDENT" "$funcmd"
                     func_flag=1
                     ;;
                 builtin)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$indent" "$funcmd"
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$CA_INDENT" "$funcmd"
                     func_flag=1
                     ;;
                 file)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$indent" "$funcmd"
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$CA_INDENT" "$funcmd"
                     func_flag=1
                     ;;
             esac
@@ -1312,7 +1332,7 @@ _ca_function_override() {
     done < <(declare -F | awk '{print $3}')
 
     if [[ $func_flag -eq 0 ]]; then
-        printf "%s    ↳ No command or builtin is overridden.\n" "$indent"
+        printf "%s    ↳ No command or builtin is overridden.\n" "$CA_INDENT"
     fi
 }
 
@@ -1321,7 +1341,7 @@ _ca_function_override() {
 # Purpose : list builtins that are disabled and note if external commands replace them
 #------------------------------------------------------------------------
 _ca_builtin_override() {
-    printf "%s├─ Examining disabled builtins to identify any replacement commands:\n" "$indent"
+    printf "%s├─ Examining disabled builtins to identify any replacement commands:\n" "$CA_INDENT"
 
     local b disabled=()
 
@@ -1331,24 +1351,24 @@ _ca_builtin_override() {
     done < <(enable -a | grep '^enable -n ')
 
     if (( ${#disabled[@]} == 0 )); then
-        printf "%s    ↳ No builtins are disabled.\n" "$indent"
+        printf "%s    ↳ No builtins are disabled.\n" "$CA_INDENT"
         return
     fi
 
     local name
     for name in "${disabled[@]}"; do
-        printf "%s    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$indent" "$name"
+        printf "%s    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$CA_INDENT" "$name"
 
         # 1. Alias replacement?
         if alias "$name" &>/dev/null; then
-            adef=$(allias "$name")
-            printf "%s       • Alias ${YELLOW}'%s' -- '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$adef"
+            adef=$(alias "$name")
+            printf "%s       • Alias ${YELLOW}'%s' -- '%s'${RESET} now replaces the builtin.\n" "$CA_INDENT" "$name" "$adef"
             continue
         fi
 
         # 2. Function replacement?
         if declare -F "$name" &>/dev/null; then
-            printf "%s       • Function ${YELLOW}'%s'${RESET} now replaces the builtin.\n" "$indent" "$name"
+            printf "%s       • Function ${YELLOW}'%s'${RESET} now replaces the builtin.\n" "$CA_INDENT" "$name"
             continue
         fi
 
@@ -1356,9 +1376,9 @@ _ca_builtin_override() {
         if command -v "$name" &>/dev/null; then
             local newpath
             newpath=$(command -v "$name")
-            printf "%s       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$newpath"
+            printf "%s       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$CA_INDENT" "$name" "$newpath"
         else
-            printf "%s       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$indent" "$name"
+            printf "%s       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$CA_INDENT" "$name"
         fi
     done
 }
@@ -1447,12 +1467,14 @@ _ca_restore_path
     for dir in "${dirs[@]}"; do
         [ -d "$dir" ] || continue
 
-        perms=$(stat -c "%A" "$dir")
-        owner_g=$(stat -c "%U:%G" "$dir")
-        note=""
+    # Resolve symlink to actual directory
+    target=$(readlink -f "$dir")
+    perms=$(stat -c "%A" "$target")
+    owner_g=$(stat -c "%U:%G" "$target")
+    note=""
 
         # Check if world-writable (other write bit set)
-        if [ -w "$dir" ] && [ "${perms:8:1}" = "w" ]; then
+        if [[ "${perms:8:1}" == "w" ]]; then
             note="${BPURP}WORLD-WRITABLE${RESET}"
             printf "    ↳ ${RED}%-40s %-15s %-20s ${RESET}%-10s\n" "$dir" "$perms" "$owner_g" "$note"
         elif [ -w "$dir" ]; then
@@ -1748,38 +1770,42 @@ _ca_sourced_files() {
 }        
 
 #------------------------------------------------------------------------
-# Function: _ca_show_shadowing
+# Function: _ca_show_path_alternates
 # Purpose : Display path shadowing of a command
 #------------------------------------------------------------------------
-_ca_show_shadowing() {
+_ca_show_path_alternates() {
     local cmd="$1" cmdpath="$2"
-    local shad=() 
+    local shad=()
     local dir
 
     IFS=':' read -ra PATH_ARR <<< "$PATH"
     for dir in "${PATH_ARR[@]}"; do
-        [[ -x "$dir/$cmd" ]] || continue
-        [[ "$dir/$cmd" == "$cmdpath" ]] && continue
-        shad+=("$dir/$cmd")   
+        [[ -z "$dir" ]] && dir="."
+        local p="$dir/$cmd"
+
+        [[ -f "$p" && -x "$p" ]] || continue
+        [[ "$p" == "$cmdpath" ]] && continue
+
+        shad+=("$p")
     done
 
-    (( ${#shad[0]} == 0 )) && return 0
+    (( ${#shad[@]} == 0 )) && return 0
 
-    printf "%s    ↳ Shadowed versions:\n" "$indent"
+    printf "%s    ↳ Alternate PATH matches:\n" "$CA_INDENT"
 
     local s
-for s in "${shad[@]}"; do
-    printf "%s    │    ${CYAN}%s${RESET}\n" "$indent" "$s"
-done
+    for s in "${shad[@]}"; do
+        printf "%s    │    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$s"
+    done
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_lookup_package  # usage: _ca_lookup_package "$cmd_path" "$indent"
+# Function: _ca_lookup_package  # usage: _ca_lookup_package "$cmd_path" "$CA_INDENT"
 # Purpose : Lookup package info for a given command path
 #------------------------------------------------------------------------
 _ca_lookup_package() {
     local cmd_path="$1"
-    local indent="${2:-}"  # optional indentation
+    local CA_INDENT="${2:-}"  # optional CA_INDENTation
     local pkg_mgr pkg_name pkg_lines=()
 
     pkg_mgr=$(_ca_detect_pkg_manager)
@@ -1838,11 +1864,11 @@ _ca_lookup_package() {
 
     # Print package info if available   ----works for apt and rpm
     if [[ -n "${pkg_lines[0]}" ]]; then
-        printf "%s    ↳ Package Info:\n" "$indent"
-        printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[0]}"
-        printf "%s    ⎟    Version: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[1]}"
-        printf "%s    ⎟    Maintainer: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[2]}"
-        printf "%s    ⎟    Description: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[3]}"
+        printf "%s    ↳ Package Info:\n" "$CA_INDENT"
+        printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$CA_INDENT" "${pkg_lines[0]}"
+        printf "%s    ⎟    Version: ${CYAN}%s${RESET}\n" "$CA_INDENT" "${pkg_lines[1]}"
+        printf "%s    ⎟    Maintainer: ${CYAN}%s${RESET}\n" "$CA_INDENT" "${pkg_lines[2]}"
+        printf "%s    ⎟    Description: ${CYAN}%s${RESET}\n" "$CA_INDENT" "${pkg_lines[3]}"
     fi
 }
 
@@ -1860,7 +1886,7 @@ _ca_detect_pkg_manager() {
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_verify_package  # usage: _ca_verify_package "$cmd_path" "$indent"
+# Function: _ca_verify_package  # usage: _ca_verify_package "$cmd_path" "$CA_INDENT"
 # Purpose : verify package for a given command
 #------------------------------------------------------------------------
 _ca_verify_package() {
@@ -1871,8 +1897,8 @@ _ca_verify_package() {
     
     ctype=$(type -t -- "$cmd" 2>/dev/null)
     if [[ -z "$ctype" ]]; then
-        printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$indent" "$cmd"
-        printf "%s    ↳ Check your spelling and try again\n\n" "$indent" 
+        printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Check your spelling and try again\n\n" "$CA_INDENT" 
         return 1
     fi
 
@@ -1920,11 +1946,11 @@ fi
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_show_hash  # usage: _ca_show_hash "$indent" "$cmd_path"
+# Function: _ca_show_hash  # usage: _ca_show_hash "$CA_INDENT" "$cmd_path"
 # Purpose : calc hashes
 #------------------------------------------------------------------------
 _ca_show_hash() {
-    local indent="$1"
+    local CA_INDENT="$1"
     local cmd="$2"
     local ctype 
     local hash=""
@@ -1946,398 +1972,7 @@ _ca_show_hash() {
             ;;
     esac
 
-    [[ -n "$hash" ]] && printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$indent" "$hash"
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_display_sxid_scan
-# Purpose : scan for SUID / SGID binaries and World-Writable directories 
-#------------------------------------------------------------------------
-_ca_display_sxid_scan() {
-    printf "=== SUID/SGID and W-W directories (Mode: -t) ===\n\n"
-    printf "├─ SUID Binaries (Identity Escalation)\n"
-    _ca_suid_threat_scan
-    printf "├─ SGID Binaries (Group Amplification)\n"
-    _ca_sgid_threat_scan
-    printf "├─ World-Writable Directories (Potential Injection Points)\n"
-    _ca_world_writable_scan
-    printf "\n================ End of list =================== \n"
-}
-
-
-#------------------------------------------------------------------------
-# Function: _ca_suid_threat_scan
-# Purpose : Scan for SUID gtfo risk binaries
-#------------------------------------------------------------------------
-_ca_suid_threat_scan() {
-    printf "├─ Scanning -- SUID threat assesment:\n"
-
-while IFS= read -r hit; do
-    _ca_threat_analyze_binary "$hit"
-done < <(find / -perm -4000 -type f 2>/dev/null)
-}
-
-declare -A THREAT_SIGS=(
-  # High confidence: trivial or near-trivial exploitation
-  [bash]="shell exec|high"
-  [sh]="shell exec|high"
-  [dash]="shell exec|high"
-  [find]="exec file-write|high"
-  [perl]="exec shell|high"
-  [python]="exec shell|high"
-  [nmap]="shell exec|high"
-  [socat]="shell exec|high"
-
-  # Medium confidence: common but situational
-  [env]="exec path-hijack|medium"
-  [awk]="exec|medium"
-  [sed]="file-write|medium"
-  [tar]="file-write|medium"
-  [openssl]="exec file-write|medium"
-  [tee]="file-write|medium"
-  [cp]="file-write|medium"
-  
-  # Low confidence: interactive / escape-based
-  [less]="shell file-read|low"
-  [more]="file-read|low"
-  [man]="shell|low"
-  [vi]="shell|low"
-  [vim]="shell file-read|low"
-  [ftp]="shell|low"
-)
-
-    #-----------------------------------------------------------
-    # Helper: _ca_threat_detect
-_ca_threat_detect() {
-    local bin="$1"
-    local sig prims confidence
-    local name
-
-    declare -A found=()
-    name=$(basename "$bin")
-    
-    case "$name" in
-        su|sudo|passwd|chsh|chfn|newgrp|gpasswd)
-        found[auth-impact]=1
-        ;;
-    esac
-
-    # ---- static signatures ----
-    if [[ -n "${THREAT_SIGS[$name]}" ]]; then
-        sig="${THREAT_SIGS[$name]}"
-        IFS='|' read -r prims confidence <<< "$sig"
-        for p in $prims; do
-            found["$p"]=1
-        done
-        [[ -n "$confidence" ]] && found["confidence:$confidence"]=1
-    fi
-
-    # ---- strings-based heuristics ----
-    local s
-    s=$(strings "$bin" 2>/dev/null)
-    
-    grep -qiE 'argv\[|getopt|getopt_long|scanf|fgets|gets' <<<"$s" && found[user-input]=1
-    grep -qiE 'system\(|execv|execl|popen' <<<"$s" && found[user-exec]=1
-    grep -qiE '\b(sh|bash|dash)\b' <<<"$s" && found[shell]=1
-    grep -qiE '\-exec\b|\-c\b|system\(' <<<"$s" && found[exec]=1
-    grep -qiE '\b(open|read|cat|less|more)\b' <<<"$s" && found[file-read]=1
-    grep -qiE '\b(write|output|tee|save)\b' <<<"$s" && found[file-write]=1
-    grep -qiE 'execvp|system|popen' <<<"$s" && ! grep -qiE 'clearenv|secure_path|setenv.*PATH' <<<"$s" &&
-        found[path-hijack]=1
-    grep -qiE 'EDITOR=|PAGER=|PATH=' <<<"$s" && found[env-inject]=1
-    grep -qiE 'set(res)?uid|seteuid|setreuid|setgid|setregid' <<<"$s" && found[priv-drop]=1
-    
-    if [[ -n "${found[priv-drop]}" ]]; then
-        # privilege-managed binaries
-        unset 'found[path-hijack]'
-        unset 'found[shell]'
-        unset 'found[exec]'
-    fi
-   
-    if [[ -n "${found[shell]}" && -z "${found[user-input]}" ]]; then
-        unset 'found[shell]'
-        found[shell-internal]=1
-    fi
-
-    if [[ -n "${found[exec]}" && -z "${found[user-input]}" ]]; then
-        unset 'found[exec]'
-        found[exec-internal]=1
-    fi
-
-    # ---- output ----
-for k in shell exec user-input auth-impact \
-         file-write path-hijack env-inject file-read \
-         confidence:high confidence:medium; do
-    [[ -n "${found[$k]}" ]] && printf "%s " "$k"
-done
-
-}
-
-    #-----------------------------------------------------------
-    # Helper: _ca_threat_score
-_ca_threat_score() {
-    local prims="$1"
-    local score=0
-
-[[ $prims == *shell* && $prims == *user-input* ]] && ((score+=6))
-[[ $prims == *exec*  && $prims == *user-input* ]] && ((score+=5))
-[[ $prims == *file-write* ]] && ((score+=3))
-[[ $prims == *path-hijack* ]] && ((score+=3))
-[[ $prims == *env-inject* ]] && ((score+=2))
-[[ $prims == *file-read* ]] && ((score+=1))
-[[ $prims == *shell-internal* ]] && ((score+=1))
-[[ $prims == *exec-internal*  ]] && ((score+=1))
-[[ $prims == *confidence:high* ]]   && ((score+=2))
-[[ $prims == *confidence:medium* ]] && ((score+=1))
-[[ $prims == *auth-impact* ]] && ((score+=2))
-[[ $prims == *priv-drop* ]] && class="managed"
-    
-    echo "$score" "$class"
-}
-
-    #-----------------------------------------------------------
-    # Helper: _ca_threat_analyze_binary
-_ca_threat_analyze_binary() {
-    local bin="$1"
-    local prims score class
-
-    prims=$(_ca_threat_detect "$bin")
-    score=$(_ca_threat_score "$prims")
-
-    if [[ $score -ge 9 ]]; then
-        class="${RED}critical${RESET}"
-    elif [[ $score -ge 5 ]]; then
-        class="${YELLOW}interesting${RESET}"
-    elif [[ $score -ge 1 ]]; then
-        class="low"
-    else
-        class="none"
-    fi
-
-    printf "   ${CYAN}%s${RESET}\n" "$bin"
-    printf "       class: %s\n" "$class"
-    printf "       primitives: %s\n" "$prims"
-
-    if [[ $score -ge 9 ]]; then
-        printf "       risk score: ${RED}%s HIGH RISK – Requires review${RESET}\n\n" "$score"
-    elif [[ $score -ge 5 ]]; then
-        printf "       risk score: ${YELLOW}%s MEDIUM RISK – Potential concern${RESET}\n\n" "$score"
-    else
-        printf "       risk score: ${YELLOW}%s MEDIUM RISK – Review recommended${RESET}\n\n" "$score"
-    fi
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_sgid_threat_scan
-# Purpose : Scan for SGID risk binaries
-#------------------------------------------------------------------------
-_ca_sgid_threat_scan() {
-    printf "├─ Scanning for SGID amplification risk:\n"
-
-    while IFS= read -r hit; do
-        _ca_sgid_threat_analyze_binary "$hit"
-    done < <(find / -perm -2000 -type f 2>/dev/null)
-}
-
-#-----------------------------------------------------------
-# Helper: _ca_sgid_threat_detect
-_ca_sgid_threat_detect() {
-    local bin="$1"
-    local sig prims confidence
-    local name
-
-    declare -A found=()
-    name=$(basename "$bin")
-
-    # ---- group-sensitive detection ----
-    local gid group
-    gid=$(stat -c %g "$bin")
-    group=$(getent group "$gid" | cut -d: -f1)
-
-    case "$group" in
-        shadow|adm|disk|docker|systemd-journal|utmp)
-            found[group-sensitive]=1
-            ;;
-    esac
-
-    # ---- strings heuristics (optional / SUID style) ----
-    local s
-    s=$(strings "$bin" 2>/dev/null)
-
-    grep -qiE 'argv\[|getopt|getopt_long|scanf|fgets|gets' <<<"$s" && found[user-input]=1
-    grep -qiE 'system\(|execv|execl|popen' <<<"$s" && found[user-exec]=1
-    grep -qiE '\b(sh|bash|dash)\b' <<<"$s" && found[shell]=1
-    grep -qiE '\b(open|read|cat|less|more)\b' <<<"$s" && found[file-read]=1
-    grep -qiE '\b(write|output|tee|save)\b' <<<"$s" && found[file-write]=1
-    grep -qiE 'EDITOR=|PAGER=|PATH=' <<<"$s" && found[env-inject]=1
-    grep -qiE 'setgid|setregid' <<<"$s" && found[priv-drop]=1
-
-    if [[ -n "${found[priv-drop]}" ]]; then
-        unset 'found[path-hijack]'
-        unset 'found[shell]'
-        unset 'found[exec]'
-    fi
-
-    [[ -n "${found[shell]}" && -z "${found[user-input]}" ]] && { unset 'found[shell]'; found[shell-internal]=1; }
-    [[ -n "${found[exec]}" && -z "${found[user-input]}" ]] && { unset 'found[exec]'; found[exec-internal]=1; }
-
-    # ---- output primitives ----
-    local key
-    local out=()
-
-    for key in shell exec user-input auth-impact file-write path-hijack env-inject file-read \
-           group-sensitive confidence:high confidence:medium; do
-        [[ -n "${found[$key]}" ]] && out+=("$key")
-    done
-
-    printf '%s ' "${out[@]}"
-    echo
-}
-
-    #-----------------------------------------------------------
-    # Helper: _ca_sgid_threat_score
-_ca_sgid_threat_score() {
-    local prims="$1"
-    local score=0
-    local class=""
-
-    [[ $prims == *group-sensitive* ]] && ((score+=4))
-    [[ $prims == *file-write* ]] && ((score+=3))
-    [[ $prims == *file-read* ]] && ((score+=2))
-    [[ $prims == *auth-impact* ]] && ((score+=2))
-    [[ $prims == *env-inject* ]] && ((score+=1))
-    [[ $prims == *priv-drop* ]] && class="managed"
-
-    echo "$score" "$class"
-}
-
-    #-----------------------------------------------------------
-    # Helper: _ca_sgid_threat_analyze_binary
-_ca_sgid_threat_analyze_binary() {
-    local bin="$1"
-    local prims score class
-
-    prims=$(_ca_sgid_threat_detect "$bin")
-    score=$(_ca_sgid_threat_score "$prims")
-
-    if [[ $score -ge 9 ]]; then
-        class="${RED}amplification${RESET}"
-    elif [[ $score -ge 5 ]]; then
-        class="${YELLOW}interesting${RESET}"
-    elif [[ $score -ge 1 ]]; then
-        class="low"
-    else
-        class="none"
-    fi
-    
-    local gid group
-    gid=$(stat -c %g "$bin")
-    group=$(getent group "$gid" | cut -d: -f1)
-
-    printf "   ${CYAN}%s${RESET}\n" "$bin"
-    printf "       class: %s\n" "$class"
-    printf "       group: %s\n" "$group"
-    printf "       primitives: %s\n" "$prims"
-
-    if [[ $score -ge 8 ]]; then
-        printf "       risk score: ${RED}%s HIGH RISK${RESET}\n\n" "$score"
-    elif [[ $score -ge 5 ]]; then
-        printf "       risk score: ${YELLOW}%s MEDIUM RISK${RESET}\n\n" "$score"
-    else
-        printf "       risk score: %s\n\n" "$score"
-    fi
-}
-
-#-----------------------------------------------------------
-# Function: _ca_world_writable_scan
-# Purpose : Identify world-writable directories as injection surfaces
-#-----------------------------------------------------------
-_ca_world_writable_scan() {
-    local dir perms owner group prims score class
-
-    printf "├─ Scanning for World-Writable directories:\n"
-
-    # Limit to high-risk locations for speed, plus /var/tmp
-    local scan_dirs=("/tmp" "/var/tmp" "/run" "/dev/shm")
-    
-    for root in "${scan_dirs[@]}"; do
-        [ -d "$root" ] || continue
-        while IFS= read -r dir; do
-            prims=()
-            score=0
-
-            # permissions and ownership
-            perms=$(stat -c "%A" "$dir" 2>/dev/null)
-            owner=$(stat -c "%U" "$dir" 2>/dev/null)
-            group=$(stat -c "%G" "$dir" 2>/dev/null)
-
-            prims+=(world-writable)
-            ((score+=1))
-
-            # sticky bit
-            if [[ "$perms" == *t ]]; then
-                prims+=(sticky)
-            else
-                prims+=(no-sticky)
-                ((score+=3))
-            fi
-
-            # ownership
-            if [[ "$owner" == "root" ]]; then
-                prims+=(root-owned)
-                ((score+=1))
-            fi
-
-            # runtime vs persistent
-            case "$dir" in
-                /tmp|/run/*|/dev/shm*)
-                    prims+=(runtime-dir)
-                    ;;
-                /var/tmp*)
-                    prims+=(persistent)
-                    ((score+=2))
-                    ;;
-                *)
-                    prims+=(persistent)
-                    ((score+=2))
-                    ;;
-            esac
-
-            # path injection potential
-            case "$dir" in
-                /tmp|/var/tmp|/dev/shm)
-                    prims+=(path-inject)
-                    ((score+=1))
-                    ;;
-            esac
-
-            # symlink abuse potential
-            prims+=(symlink-attack)
-            ((score+=1))
-            
-# path injection potential
-if grep -qE "(^|:)$dir(:|$)" <<<"$PATH"; then
-    prims+=(path-inject)
-    ((score+=1))
-fi
-            # classification
-            if (( score >= 9 )); then
-                class="${RED}critical${RESET}"
-            elif (( score >= 3 )); then
-                class="${YELLOW}interesting${RESET}"
-            else
-                class="low"
-            fi
-
-            # Output
-            printf "   ${CYAN}%s${RESET}\n" "$dir"
-            printf "       owner: %s:%s\n" "$owner" "$group"
-            printf "       perms: %s\n" "$perms"
-            printf "       primitives: %s\n" "${prims[*]}"
-            printf "       risk score: %s (%s)\n\n" "$score" "$class"
-
-        done < <(find "$root" -type d -perm -0002 2>/dev/null | sort -u)
-    done
+    [[ -n "$hash" ]] && printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$hash"
 }
 
 #-----------------------------------------------------------
@@ -2357,5 +1992,193 @@ _ca_list_user_bin() {
     done
 }
 
+# ----------------------------------------------------------------------
+# Function: _ca_function
+# Builds a clickable list of shell functions with file links
+# ----------------------------------------------------------------------
+_ca_function() {
+    CA_INDENT=$(printf "%*s" $((depth * 4)) "")
+    local verbose=${verbose:-0}
+
+    local fn
+    if [[ "$verbose" == 1 ]]; then
+        # Show all functions including internal
+        compgen -A function | while read -r fn; do
+            _ca_print_fn "$fn" "$CA_INDENT"
+        done
+    else
+        # Filter out internal/system functions
+        compgen -A function | grep -Ev '^(__|_|_comp|_python_)' | while read -r fn; do
+            _ca_print_fn "$fn" "$CA_INDENT"
+        done
+    fi
+}
+
+# ----------------------------------------------------------------------
+# Helper: print a single function line with clickable link
+_ca_print_fn() {
+    local fn="$1"
+    local CA_INDENT="$2"
+    local was_extdebug=0 _ line file
+
+    # Enable extdebug to get file/line
+    if ! shopt -q extdebug; then
+        shopt -s extdebug
+        was_extdebug=1
+    fi
+
+    read -r _ line file <<< "$(declare -F "$fn")"
+    (( was_extdebug )) && shopt -u extdebug
+
+    # Default fallback for interactive or missing file
+    [[ -z "$file" ]] && file="?"
+
+    # Build clickable line with function name, file, line
+    local clickable_text
+    clickable_text=$(printf "%s%s  -- Defined in: %s (line %s)" \
+        "$CA_INDENT" "$fn" "$file" "$line")
+
+    # Print clickable link
+    printf "\e]8;;file://%s\a%s\e]8;;\a\n" "$file" "$clickable_text"
+}
+
+# ----------------------------------------------------------------------
+# Function: _ca_aliases
+# Builds a clickable list of shell aliases with file links
+# ----------------------------------------------------------------------
+_ca_aliases() {
+ 
+    local CA_INDENT
+    CA_INDENT=$(printf "%*s" $((depth * 4)) "")
+
+    # Ensure sourced files list exists
+    _ca_ensure_sourcedtree
+    [[ -z "${__CA_SOURCED_FILES_LIST[*]}" ]] && return
+
+    # Temporarily enable nullglob
+    local nullglob_was=0
+    if ! shopt -q nullglob; then
+        shopt -s nullglob
+        nullglob_was=1
+    fi
+
+    # Iterate over all aliases
+    for alias_name in $(compgen -A alias); do
+        local file line_number found=0
+
+        # Search for the first file defining this alias
+        for file in "${__CA_SOURCED_FILES_LIST[@]}"; do
+            [[ -r "$file" ]] || continue
+            line_number=$(grep -nE "^[[:space:]]*alias[[:space:]]+${alias_name}[[:space:]]*=" "$file" | head -n1 | cut -d: -f1)
+            if [[ -n "$line_number" ]]; then
+                found=1
+                break
+            fi
+        done
+
+        # Skip if not found
+        [[ $found -eq 0 ]] && continue
+
+        # Build clickable line
+        local clickable_text
+        clickable_text=$(printf "%s%s  -- Defined in: %s (line %s)" \
+            "$CA_INDENT" "$alias_name" "$file" "$line_number")
+
+        # Print entire line as clickable link
+        printf "\e]8;;file://%s\a%s\e]8;;\a\n" "$file" "$clickable_text"
+    done
+
+    # Restore nullglob if we changed it
+    (( nullglob_was == 1 )) && shopt -u nullglob
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_resolve_command   
+# Purpose: Command Resolution Trace
+#------------------------------------------------------------------------
+_ca_resolve_command() {
+    local cmd="$1"
+    local -n out_ref="$2"
+    out_ref=()
+
+    # Alias
+    if alias "$cmd" &>/dev/null; then
+        out_ref+=("alias|$(alias "$cmd")")
+        out_ref+=("winner|alias")
+        return
+    fi
+
+    # Function
+    if declare -F "$cmd" &>/dev/null; then
+        local was_extdebug=0
+        shopt -q extdebug || { shopt -s extdebug; was_extdebug=1; }
+        read -r _ line file <<< "$(declare -F "$cmd")"
+        (( was_extdebug )) && shopt -u extdebug
+
+        out_ref+=("function|$file|$line")
+        out_ref+=("winner|function")
+        return
+    fi
+
+    # Builtin
+    if [[ "$(type -t "$cmd")" == "builtin" ]]; then
+        out_ref+=("builtin|enabled")
+        out_ref+=("winner|builtin")
+        return
+    fi
+
+    # PATH
+    IFS=: read -ra dirs <<< "$PATH"
+    for d in "${dirs[@]}"; do
+        local p="$d/$cmd"
+        [[ -f "$p" && -x "$p" ]] || continue
+        out_ref+=("path|$p")
+        out_ref+=("winner|path|$p")
+        return
+    done
+}
+
+#---------------------
+# helper
+_ca_print_trace() {
+    local cmd="$1"
+    local -a res
+    _ca_resolve_command "$cmd" res
+
+    printf "\nResolution order (Bash precedence):\n\n"
+
+    local winner=""
+    for entry in "${res[@]}"; do
+        IFS='|' read -r kind a b <<< "$entry"
+
+        case "$kind" in
+            alias)
+                printf "  1. Alias\n"
+                printf "     ✔ %s\n" "$a"
+                [[ -z "$winner" ]] && winner="alias"
+                ;;
+            function)
+                printf "  2. Function\n"
+                printf "     ✔ defined in %s:%s\n" "$a" "$b"
+                [[ -z "$winner" ]] && winner="function"
+                ;;
+            builtin)
+                printf "  3. Builtin\n"
+                printf "     ✔ enabled\n"
+                [[ -z "$winner" ]] && winner="builtin"
+                ;;
+            path)
+                printf "  4. PATH\n"
+                printf "     ✔ %s\n" "$a"
+                [[ -z "$winner" ]] && winner="$a"
+                ;;
+        esac
+    done
+
+    printf "\nFinal result:\n"
+    printf "  → Executed: %s\n\n" "$winner"
+}
+
 #------------------------------------------------------------------------
 # End of script
+ 
