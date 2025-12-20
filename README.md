@@ -86,11 +86,15 @@ If no command is provided, `ca` will analyze your **most recent command**.
 | -------------------- | ------------------------------------------------------------------ |
 | `-h`, `--help`       | Show help text                                                     |
 | `-v`, `--version`    | Show version information                                           |
-| `-f`, `--fzf`        | Interactively search for commands (requires `fzf`)                 |
+| `-f`, `--functions`  | list all user functions in the enviroment                          |
+| `-fv`,`--funverb`    | Verbose - list ALL functions in the enviroment                     | 
+| `-a`, `--aliases`    | list all user aliases in the enviroment                            |
 | `-s`, `--sourced`    | List all sourced files in your environment                         |
 | `-o`, `--overridden` | List commands that override others                                 |
 | `-p`, `--path`       | List all directories in `$PATH` and highlight writable directories |
 | `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories         |
+| `-V`, `--verify`     | Verify package integrity                                           |
+| `--fzf`              | Interactively search for commands (requires `fzf`)                 |
 
 ---
 
