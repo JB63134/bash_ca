@@ -1,0 +1,1493 @@
+#!/usr/bin/env bash
+#------------------------------------------------------------------------
+# ta  aka .bash_ta           ┌──────┐ │      │ └──────┘
+# Main Function: ta                                                                         
+# Purpose: threat assessment
+#------------------------------------------------------------------------
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+
+# shellcheck disable=SC2034
+ta_needed_deps=(grep basename file find sed cut head readlink realpath awk ldd getcap perl)
+# shellcheck disable=SC2034
+ta_optional_deps=(tput fzf batcat bat dpkg rpm pacman)
+
+OLD_PATH="$PATH"
+
+declare -g __TA_SOURCED_SCANNED=0
+declare -gA __TA_SOURCED_FILES_MAP=()    
+declare -ga __TA_SOURCED_FILES_LIST=()  
+complete -F _ta_completion ta
+
+ta() {
+    # -------------------------
+    # LOCAL Variables
+    # -------------------------
+    local fcmd cmd ctype cmd_path RED GREEN CYAN RESET 
+    local depth=${2:-0}
+    local MAX_DEPTH=8
+    local indent
+    indent=$(printf "%*s" $((depth * 4)) "")
+    
+    # -------------------------
+    # Colors (tput → ANSI → none)
+    # -------------------------
+    if command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null) -ge 8 ]]; then
+        # Preferred: tput colors
+        RED=$(tput setaf 1)
+        GREEN=$(tput setaf 2)
+        CYAN=$(tput setaf 6)
+        YELLOW=$(tput setaf 11)
+        BPURP=$(tput setaf 13)
+        RESET=$(tput sgr0)
+        UNLINE=$(tput smul)
+        STOPUNLINE=$(tput rmul)
+    else
+        # Fallback: ANSI escape sequences
+        RED='\033[31m'
+        GREEN='\033[32m'
+        CYAN='\033[36m'
+        YELLOW='\033[93m'
+        BPURP='\033[95m'
+        RESET='\033[0m'
+        UNLINE='\033[4m'
+        STOPUNLINE='\033[0m'
+    fi
+ 
+    : "${RED:=}"
+    : "${GREEN:=}"
+    : "${CYAN:=}"
+    : "${YELLOW:=}"
+    : "${BPURP:=}"
+    : "${RESET:=}"
+    : "${UNLINE:=}"
+    : "${STOPUNLINE:=}"
+ 
+    # -------------------------
+    # Set first run variables path etc... keep from running every recursive loop 
+    # set new path, clean arrays, and greet user once
+    # -------------------------
+    if (( depth == 0 )); then
+        trap '_ta_restore_path' RETURN
+        _ta_add_admin_paths
+
+        #--------------------------
+        # Reset arrays on first run
+        #--------------------------
+        __TA_SOURCED_SCANNED=0
+
+        #--------------------------
+        # Greeting
+        #--------------------------
+        printf "\n╔══════════════════════════════════════════════╗\n"
+        printf "║  ta – Bash Threat assessment                 ║\n"
+        printf "╚══════════════════════════════════════════════╝\n"
+        
+        # -------------------------
+        # Check dependencies
+        _ta_check_dependencies ta_needed_deps ta_optional_deps 1  || return 1 # 1 = exit if required deps missing
+    fi 
+    
+    # -------------------------
+    # Depth guard
+    # -------------------------
+    (( depth > MAX_DEPTH )) && { 
+        printf "%s${RED}Max recursion depth (%d) reached${RESET}\n" "$indent" "$MAX_DEPTH"
+        return 1 
+    }
+    
+    # -------------------------
+    # Get command or last command
+    # -------------------------
+    if [[ -n "$1" ]]; then
+        read -r -a fcmd <<< "$1"
+    fi
+    cmd="${fcmd[0]}"
+    
+    # -------------------------------------------------------------------------
+    # handle arguments for ta
+    # -------------------------------------------------------------------------
+    local ocmd
+    read -r -a ocmd <<< "$(fc -ln -1)"
+    cmd0="${ocmd[0]}"
+    
+    case "$cmd" in
+        -h|--help) _ta_usage; return 0;;
+        -v|--version) _ta_ver; return 0;;
+        -s|--sourced) printf "\n"; _ta_sourced_files; return 0;;
+        -o|--overridden) printf "\n"; _ta_overridden; return 0;;
+        -p|--path) printf "\n"; _ta_writable_dir_in_path; return 0;;
+        -S|--scan) printf "\n"; _ta_display_files_scan; return 0;;
+        -t|--threat) printf "\n"; _ta_display_sxid_scan; return 0;;
+        -V|--verify)
+            printf "\n"
+            # Remove the -V/--verify argument
+            shift 1
+            # Optional: check if user supplied a command or file
+            if [[ -n $1 ]]; then
+            _ta_verify_package "$1"
+            else
+            # If no argument, verify the last analyzed command (or current $CMD)
+            _ta_verify_package "$cmd0"
+            fi
+            return 0
+            ;;
+    esac
+    
+    # -------------------------------------------------------------------------
+    # Handle ta for now, prevent ta from analyzing itself because 
+    # it will spam the screen with itself
+    # -------------------------------------------------------------------------
+    if [[ "$cmd" == "ta" ]]; then
+            printf "%s├─ Detected ${CYAN}'%s' ${RESET}\n" "$indent" "$cmd"
+            printf "%s    ↳ Showing  ${CYAN}'%s --help'${RESET}:\n\n"  "$indent" "$cmd"
+            _ta_usage
+            return 0
+    fi
+
+    if [[ -z "$cmd" ]]; then
+        printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$indent" "$cmd"
+        printf "%s    ↳ Check your spelling and try again\n\n" "$indent" 
+        return 1
+    fi
+}
+
+
+#------------------------------------------------------------------------
+# Function: _ta_usage
+# Purpose : Display usage information and examples for the `h` command analyzer.
+#------------------------------------------------------------------------
+_ta_usage() {
+    cat <<'EOF'
+
+     Usage:  ta [command]  
+
+     Options:
+           -h --help or h      Show this help text.
+           -v --version        Show version information.
+           -f --fzf            Use fzf to interactivly search for commands     
+           -s --sourced        List all sourced files in the enviroment.
+           -o --overridden     List all commands that override another command in the enviroment.
+           -p --path           List all directories in $PATH and highlight writable directories.
+           -S --scan           List SUID binaries, SGID binaries and World Writable directories.
+           -t --threat         Threat assessment scan of SUID/SGID binaries and World Writable directories.
+           -V --verify         Verify package integrity, supports dpkg rpm and pacman.
+           
+     Examples:
+           ta                   # Automatically analyzes your most recent command
+           ta awk               # Analyzes 'awk'
+           ta ls                # Is 'ls' a builtin, keyword, alias, function, script or binary?
+  
+EOF
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_ver
+# Purpose : Display version information.
+#------------------------------------------------------------------------
+_ta_ver() {
+    cat <<'EOF'
+
+     ta v1.0.0 — Bash Threat Assessment
+     Author : John Blair
+          
+     MIT License
+
+     Copyright (c) 2025 John Blair
+
+     Permission is hereby granted, free of charge, to any person obtaining a copy
+     of this software and associated documentation files (the "Software"), to deal
+     in the Software without restriction, including without limitation the rights
+     to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+     copies of the Software, and to permit persons to whom the Software is
+     furnished to do so, subject to the following conditions:
+
+     The above copyright notice and this permission notice shall be included in all
+     copies or substantial portions of the Software.
+
+     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+     SOFTWARE.
+
+EOF
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_add_admin_paths
+# Purpose: Add ~/.local/bin paths safely and temporarily
+#------------------------------------------------------------------------
+_ta_add_admin_paths() {
+    # Save PATH if not already saved 
+    if [[ -z "$OLD_PATH" ]]; then
+        OLD_PATH="$PATH"
+    fi
+
+    local admin_dirs=(
+            "$HOME/.local/bin"
+            "$HOME/bin/scripts"
+            "$HOME/bin"
+            "$HOME/.cargo/bin"
+            "$HOME/.npm-global/bin"
+            "$HOME/.local/share/bash-completion/bin"
+            "$BASH_ENV"
+            "$CONDA_PREFIX/bin"
+            "/flatpak/bin"         
+            "/snap/bin"
+            "/usr/local/bin"
+            "/usr/local/sbin"
+            "/usr/local/games"
+            "/usr/bin"
+            "/usr/sbin"        
+            "/usr/games"
+            "/bin"
+            "/sbin"  
+            "/opt/bin"
+            "/opt/sbin"         
+            )
+            
+    # Add admin dirs to PATH if missing
+    for dir in "${admin_dirs[@]}"; do
+        if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
+            PATH="$PATH:$dir"
+        fi
+    done
+    
+    while IFS= read -r d; do
+        [[ -d "$d" && ":$PATH:" != *":$d:"* ]] && PATH="$PATH:$d"
+    done < <(find "$HOME/.local/bin" -type d 2>/dev/null)
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_restore_path
+# Automatically restore PATH when leaving scope
+#------------------------------------------------------------------------
+_ta_restore_path() {
+    if [[ -n "$OLD_PATH" ]]; then
+        PATH="$OLD_PATH"
+        unset OLD_PATH
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_completion
+# Purpose : Enable tab completion for entering commands 
+#------------------------------------------------------------------------
+_ta_completion() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local commands
+    
+    trap '_ta_restore_path' RETURN
+    _ta_add_admin_paths
+    
+    # Collect possible completions: aliases, functions, builtins, and executables in PATH
+    mapfile -t commands < <(compgen -A function -A alias -A builtin -A command -- "$cur")
+    # Provide them to bash-completion
+    COMPREPLY=("${commands[@]}")
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_expand_vars
+# Purpose : expand variables for aliases so $HOME resolves to /home/jb/ 
+#------------------------------------------------------------------------
+_ta_expand_vars() {
+    local input="$1"
+    # Only expand variables like $HOME, $USER, etc. Use 'printf' with parameter expansion to avoid arbitrary command execution.
+    # Use a small whitelist: HOME, USER, PWD, SHELL
+    local out="$input"
+    [[ -n "$HOME" ]] && out="${out//\$HOME/$HOME}"
+    [[ -n "$USER" ]] && out="${out//\$USER/$USER}"
+    [[ -n "$PWD" ]] && out="${out//\$PWD/$PWD}"
+    [[ -n "$SHELL" ]] && out="${out//\$SHELL/$SHELL}"
+    printf '%s' "$out"
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_sourcedtree
+# Purpose: Recursively scan .bashrc for ALL files that are sourced. including conditionals.
+#------------------------------------------------------------------------
+_ta_sourcedtree() {
+    local file files depth max_depth
+    depth=0
+    max_depth="${MAX_DEPTH:-5}"
+    files=("$BASH_ENV")
+
+if shopt -q login_shell; then
+    [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
+    [[ -f /etc/profile && -r /etc/profile ]] && files+=( /etc/profile )
+        if [[ -f ~/.bash_profile && -r ~/.bash_profile ]]; then 
+            files+=( ~/.bash_profile )
+        elif [[ -f ~/.bash_login && -r ~/.bash_login ]]; then 
+            files+=( ~/.bash_login )
+        elif [[ -f ~/.profile && -r ~/.profile ]]; then 
+            files+=( ~/.profile )
+        fi
+else
+    # Non-login interactive shell
+    [[ -d /etc/bash.bashrc.d ]] && files+=( /etc/bash.bashrc.d/*.sh )
+    [[ -f ~/.bashrc && -r ~/.bashrc ]] && files+=( ~/.bashrc )
+    [[ -f /etc/bash.bashrc && -r /etc/bash.bashrc ]] && files+=( /etc/bash.bashrc )
+    [[ -f /etc/bashrc && -r /etc/bashrc ]] && files+=( /etc/bashrc )
+   
+    if [ -f /etc/os-release ]; then
+        while IFS='=' read -r key value; do
+            # Remove surrounding quotes if present
+            value="${value%\"}"
+            value="${value#\"}"
+            case "$key" in
+                ID)
+                    [[ "$value" == "fedora" || "$value" == "rhel" ]] && is_rhel_like=1
+                    ;;
+                ID_LIKE)
+                    [[ "$value" == *"rhel"* ]] && is_rhel_like=1
+                    ;;
+            esac
+        done < /etc/os-release
+
+        if [[ -n "$is_rhel_like" ]]; then
+            # This system is Fedora/RHEL-like
+            files+=( /etc/profile.d/*.sh )
+        fi
+    fi
+fi  
+  
+    for file in "${files[@]}"; do
+        _ta_sourcedtree_single "$file" "$depth" "$max_depth"
+    done
+}
+
+    #-----------------------------------------------------------
+    # Internal recursive function
+_ta_sourcedtree_single() {
+    local file="$1"
+    local depth="${2:-0}"
+    local max_depth="${3:-5}"
+    (( depth > max_depth )) && return
+
+# Expand path
+local expanded
+expanded=$(_ta_expand_path "$file")
+expanded="${expanded%%$'\n'}"   # strip newlines
+
+# Skip empty, duplicates, or unreadable files
+[[ -z "$expanded" ]] && return
+[[ -n ${__TA_SOURCED_FILES_MAP["$expanded"]} ]] && return
+[[ ! -f "$expanded" || ! -r "$expanded" ]] && return
+
+__TA_SOURCED_FILES_MAP["$expanded"]=1
+__TA_SOURCED_FILES_LIST+=("$expanded")
+
+    local line f left right
+
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+        #   Standard source/dot
+        if [[ $line =~ ^[[:space:]]*(source|\.)[[:space:]]+(.+) ]]; then
+            for f in ${BASH_REMATCH[2]}; do
+                f=$(_ta_expand_path "$f")
+                [[ -f "$f" ]] && _ta_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
+            done
+            continue
+        fi
+
+        #  Conditional: [[ -f FILE ]] && source FILE
+        if [[ $line == *"&&"* ]]; then
+            left=${line%%&&*}
+            right=${line#*&&}
+            # Remove leading/trailing spaces
+            left=${left##*( )}
+            left=${left%%*( )}
+            right=${right##*( )}
+            right=${right%%*( )}
+
+            # Check if left is [[ -f FILE ]] and right is source FILE
+            if [[ $left =~ \[\[[[:space:]]*-f[[:space:]]+([^]]+)\]\] ]] && [[ $right =~ ^source[[:space:]]+(.+) ]]; then
+                f=$(_ta_expand_path "${BASH_REMATCH[1]}")
+                [[ -f "$f" ]] && _ta_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
+            fi
+            continue
+        fi
+
+        #   For loops: for VAR in FILES; do source $VAR; done
+        if [[ $line =~ ^[[:space:]]*for[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+in[[:space:]]+(.+) ]]; then
+            for f in ${BASH_REMATCH[1]}; do
+                f=$(_ta_expand_path "$f")
+                [[ -f "$f" ]] && _ta_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
+            done
+            continue
+        fi
+
+#  Array sourcing: source "${ARRAY[@]}"  (safe mode, no eval)
+if [[ $line =~ source[[:space:]]+\"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\[@\]\}\" ]]
+then
+    local arr_name="${BASH_REMATCH[1]}"
+    local decl
+
+    # Extract array declaration safely
+    decl=$(declare -p "$arr_name" 2>/dev/null) || return
+
+    # Only allow indexed or associative arrays
+    [[ $decl =~ ^declare\ -[aA] ]] || return
+
+    # Extract elements (still text, not executed)
+    local elems
+    mapfile -t elems < <(
+        sed -n 's/^declare \-[aA][^=]*=(//p' <<<"$decl" |
+        tr -d '()' |
+        tr ' ' '\n'
+    )
+
+    for f in "${elems[@]}"; do
+        # Reject anything remotely executable
+        [[ $f =~ [\$\`\;\&\|] ]] && continue
+
+        f=$(_ta_expand_path "$f")
+        [[ -f "$f" ]] && _ta_sourcedtree_single "$f" $((depth + 1)) "$max_depth"
+    done
+fi
+
+    done < "$expanded"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ta_expand_path
+_ta_expand_path() {
+    local p="$1"
+
+    # Strip quotes, semicolons, leading/trailing spaces
+    p="${p//\"/}"
+    p="${p//\'/}"
+    p="${p//;/}"
+    p="${p##*( )}"
+    p="${p%%*( )}"
+
+    # Tilde expansion
+    [[ "$p" == "~"* ]] && p="${p/#\~/$HOME}"
+
+    # Replace known environment variables
+    [[ -n "$HOME" ]] && p="${p//\$HOME/$HOME}"
+    [[ -n "$BASH_ENV" ]] && p="${p//\$BASH_ENV/$BASH_ENV}"
+
+    # Convert to absolute path if possible
+    if command -v realpath &>/dev/null && [[ -e "$p" ]]; then
+        p=$(realpath "$p" 2>/dev/null || echo "$p")
+    fi
+
+    # Remove newlines and trailing spaces
+    p="${p//$'\n'/}"
+    p="${p%%*( )}"
+    printf '%s' "$p"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ta_ensure_sourcedtree
+_ta_ensure_sourcedtree() {
+    (( __TA_SOURCED_SCANNED )) && return
+    _ta_sourcedtree
+    __TA_SOURCED_SCANNED=1
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_highlight_script   # _ta_highlight_script "$path-to-script" "<blankspaces>"
+# Purpose: Modular syntax highlighting with indentation based on string in $2
+#------------------------------------------------------------------------
+_ta_highlight_script() {
+    local input="$1"
+    local indent="    "
+    local file="$3"
+    local line="$4"
+   
+    # Construct header for literal text or file
+    local header=""
+    if [[ -n "$file" && -n "$line" ]]; then
+        if [[ "$file" == "main" ]]; then
+            header="Interactive shell (not from a file)"
+        else    
+        header="$file (line $line)"
+        fi
+    elif [[ -f "$input" ]]; then
+        header="$input"
+    fi
+    
+    # Read file if it exists
+    local code
+    if [[ -f "$input" ]]; then
+        code=$(<"$input")
+    else
+        code="$input"
+    fi
+    
+#----------------------------------------
+# Choose bat or batcat, if available
+local bat_pager=""
+if command -v bat &>/dev/null; then
+    bat_pager="bat"
+elif command -v batcat &>/dev/null; then
+    bat_pager="batcat"
+fi
+
+#----------------------------------------
+# If bat is available, use it
+if [[ -n "$bat_pager" ]]; then
+    if [[ -f "$input" ]]; then
+        "$bat_pager" --color=always --paging=never --line-range :50 --file-name "$input" "$input" \
+        | sed "s/^/$indent/"
+    else
+        # Input is literal text → use process substitution
+        printf "%s" "$code" \
+        | "$bat_pager" --color=always --language bash --paging=never --line-range :50 --file-name "$header" - \
+        | sed "s/^/$indent/"
+    fi
+    return
+fi
+
+    perl - "$code" "$indent" <<'PERL_CODE'
+use strict;
+use warnings;
+
+my $content = $ARGV[0];
+my $indent = $ARGV[1] // "";
+
+# ANSI colors
+my %C = (
+    comment   => "\e[36m",
+    string    => "\e[96m",
+    subshell  => "\e[35m",
+    decl      => "\e[32m",
+    control   => "\e[93m",
+    builtin   => "\e[32m",
+    command   => "\e[35m",
+    variable  => "\e[33m",
+    number    => "\e[34m",
+    bracket   => "\e[37m",
+    reset     => "\e[0m",
+);
+
+# Patterns for syntax highlighting
+my @patterns = (
+    { regex => qr/("(?:[^"\\]|\\.)*")/,       color => 'string' },
+    { regex => qr/('(?:[^'\\]|\\.)*')/,       color => 'string' },
+    { regex => qr/\$\((?:[^()]+|(?R))*\)/x,   color => 'subshell' },
+    { regex => qr/`[^`]*`/,                    color => 'subshell' },
+    { regex => qr/\b(local|declare|export|typeset)\b/, color => 'decl' },
+    { regex => qr/\b(if|then|else|elif|fi|for|while|do|done|until|select|case|esac|break|continue)\b/, color => 'control' },
+    { regex => qr/\b(function|return|exit|trap|shift|read|mapfile|set|unset)\b/, color => 'builtin' },
+    { regex => qr/\b(printf|echo|mkdir|find|grep|sed|awk|cut|sort|head|tail|xargs|cat|touch|chmod|chown|curl|wget)\b/, color => 'command' },
+    { regex => qr/\$[A-Za-z0-9_@#*!?_-]+/, color => 'variable' },
+    { regex => qr/\b[0-9]+(\.[0-9]+)?\b|0x[0-9A-Fa-f]+/, color => 'number' },
+    { regex => qr/\[\[|\]\]|\(\(|\)\)|\(|\)|\{|\}/, color => 'bracket' },
+    { regex => qr/#.*/, color => 'comment' },
+);
+
+sub highlight {
+    my ($line, $indent) = @_;
+    foreach my $p (@patterns) {
+        $line =~ s/($p->{regex})/$C{$p->{color}}$1$C{reset}/g;
+    }
+    return $indent . $line;
+}
+
+for my $line (split /\n/, $content) {
+    print highlight($line, $indent), "\n";
+}
+PERL_CODE
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_check_dependencies
+# Purpose : Check core and optional dependencies, optionally exit on missing core deps
+# Usage   : _ta_check_dependencies needed_deps optional_deps [EXIT_ON_MISSING] 0or1
+#------------------------------------------------------------------------
+_ta_check_dependencies() {
+    local -n required="$1"
+    local -n optional="$2"
+    local exit_on_missing="${3:-1}"
+
+    local missing_required=()
+    local missing_optional=()
+
+    for cmd in "${required[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing_required+=("$cmd")
+    done
+
+    for cmd in "${optional[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing_optional+=("$cmd")
+    done
+
+    if (( ${#missing_required[@]} )); then
+        printf "%b\n" "${RED}Warning: Missing REQUIRED tools: ${missing_required[*]}${RESET}"
+        if (( exit_on_missing )); then
+            printf "%b\n" "${RED}Cannot continue analysis without core dependencies.${RESET}"
+            if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+                exit 1
+            else
+                return 1
+            fi
+        fi
+    fi
+
+    return 0
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_overridden                         
+# Purpose : list all commands that override another command
+#------------------------------------------------------------------------
+_ta_overridden() {
+    printf "======== Override Inspection (Mode: -o) ========\n\n"
+    _ta_alias_override
+    printf "\n"  
+    _ta_function_override
+    printf "\n"  
+    _ta_builtin_override
+    printf "\n================ End of list =================== \n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_alias_override                         
+# Purpose : list all aliases that override a command
+#------------------------------------------------------------------------
+_ta_alias_override() { 
+    local acmd list akind
+    local flag=0
+    
+    printf "%s├─ Examining aliases to detect overridden commands:\n" "$indent"
+
+    while IFS= read -r acmd; do
+        mapfile -t list < <(type -at "$acmd")
+
+        # Deduplicate results
+        declare -A seen=()
+        local uniq=()
+        for akind in "${list[@]}"; do
+            [[ ${seen[$akind]} ]] && continue
+            uniq+=("$akind")
+            seen[$akind]=1
+        done
+
+        for akind in "${uniq[@]}"; do
+            case "$akind" in
+                builtin)
+                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$indent" "$acmd"
+                    flag=1 ;;
+                file)
+                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$indent" "$acmd"
+                    flag=1 ;;
+            esac
+        done
+    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
+
+    if (( flag == 0 )); then
+        printf "%s    ↳ ${CYAN}No command or builtin is overridden.${RESET}\n" "$indent"
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_function_override                         
+# Purpose : list all functions that override a command
+#------------------------------------------------------------------------
+_ta_function_override() { 
+    local funcmd kind kinds 
+    local func_flag=0
+
+    printf "%s├─ Examining functions to detect overridden commands:\n" "$indent"
+
+    # Get list of function names
+    while read -r funcmd; do
+        mapfile -t kinds < <(type -at "$funcmd")
+
+        for kind in "${kinds[@]}"; do
+            case "$kind" in
+                alias)
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides an alias of the same name.\n" "$indent" "$funcmd"
+                    func_flag=1
+                    ;;
+                keyword)
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} conflicts with a shell keyword of the same name (keyword takes precedence).\n" "$indent" "$funcmd"
+                    func_flag=1
+                    ;;
+                builtin)
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$indent" "$funcmd"
+                    func_flag=1
+                    ;;
+                file)
+                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$indent" "$funcmd"
+                    func_flag=1
+                    ;;
+            esac
+        done
+    done < <(declare -F | awk '{print $3}')
+
+    if [[ $func_flag -eq 0 ]]; then
+        printf "%s    ↳ No command or builtin is overridden.\n" "$indent"
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_builtin_override
+# Purpose : list builtins that are disabled and note if external commands replace them
+#------------------------------------------------------------------------
+_ta_builtin_override() {
+    printf "%s├─ Examining disabled builtins to identify any replacement commands:\n" "$indent"
+
+    local b disabled=()
+
+    # Collect disabled builtins
+    while read -r b; do
+        disabled+=("${b#enable -n }")
+    done < <(enable -a | grep '^enable -n ')
+
+    if (( ${#disabled[@]} == 0 )); then
+        printf "%s    ↳ No builtins are disabled.\n" "$indent"
+        return
+    fi
+
+    local name
+    for name in "${disabled[@]}"; do
+        printf "%s    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$indent" "$name"
+
+        # 1. Alias replacement?
+        if alias "$name" &>/dev/null; then
+            adef=$(alias "$name")
+            printf "%s       • Alias ${YELLOW}'%s' -- '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$adef"
+            continue
+        fi
+
+        # 2. Function replacement?
+        if declare -F "$name" &>/dev/null; then
+            printf "%s       • Function ${YELLOW}'%s'${RESET} now replaces the builtin.\n" "$indent" "$name"
+            continue
+        fi
+
+        # 3. External command replacement?
+        if command -v "$name" &>/dev/null; then
+            local newpath
+            newpath=$(command -v "$name")
+            printf "%s       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$indent" "$name" "$newpath"
+        else
+            printf "%s       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$indent" "$name"
+        fi
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_display_files_scan
+# Purpose : scan for SUID / SGID binaries and World-Writable directories 
+#------------------------------------------------------------------------
+_ta_display_files_scan() {
+    printf "=== SUID/SGID and W-W directories (Mode: -S) ===\n\n"
+    _ta_suid_scan
+    printf "\n"
+    _ta_sgid_scan
+    printf "\n"
+    _ta_find_world_writable_dirs
+    printf "\n================ End of list =================== \n"
+}
+#------------------------------------------------------------------------
+# Function: _ta_sgid_scan
+# Purpose : Scan for SGID binaries
+#------------------------------------------------------------------------
+_ta_sgid_scan() {
+    printf "├─ Scanning for SGID binaries:\n"
+
+    while IFS= read -r hitg; do
+        printf "    ↳ ${YELLOW}%s${RESET}\n" "$hitg"
+    done < <(find / -perm -2000 -type f -exec ls -l {} + 2>/dev/null)
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_suid_scan
+# Purpose : Scan for SUID binaries
+#------------------------------------------------------------------------
+_ta_suid_scan() {
+    printf "├─ Scanning for SUID binaries:\n"
+
+    while IFS= read -r hit; do
+        printf "    ↳ ${YELLOW}%s${RESET}\n" "$hit"
+    done < <(find / -perm -4000 -type f -exec ls -l {} + 2>/dev/null)
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_find_world_writable_dirs
+# Purpose : Scan for world_writable_dirs
+#------------------------------------------------------------------------
+_ta_find_world_writable_dirs() {
+
+    printf "├─ Scanning for World-Writable directories:\n"
+
+    # Find world-writable directories
+    mapfile -t dirs < <(find / -type d -perm -0002 2>/dev/null)
+
+    for dir in "${dirs[@]}"; do
+        [ -d "$dir" ] || continue
+
+        perms=$(stat -c "%A" "$dir")
+        owner_g=$(stat -c "%U:%G" "$dir")
+        note=""
+
+        # Check sticky bit (position 9)
+        sticky="${perms:9:1}"
+
+        if [ "$sticky" = "t" ] || [ "$sticky" = "T" ]; then
+            note="${YELLOW}WORLD-WRITABLE + STICKY${RESET}"
+            printf "    ↳ ${YELLOW}%-40s %-10s %-20s %-25s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+        else
+            note="${RED}WORLD-WRITABLE!${RESET}"
+            printf "    ↳ ${RED}%-40s %-10s %-20s %-25s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+        fi
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_writable_dir_in_path
+# Purpose : Detect writable directories in $PATH
+#------------------------------------------------------------------------
+_ta_writable_dir_in_path() {
+_ta_restore_path
+    printf "========== PATH Inspection (Mode: -p) ==========\n\n"                          
+    printf "├─ Examining PATH directory Order and Permissions:\n"
+    printf "    ↳ %s%-40s %-15s %-20s %-10s%s\n" "$UNLINE" "Directory" "Perms" "Owner:Group" "Note" "$STOPUNLINE"
+
+#    printf "    ↳ ${UNLINE}%-40s %-15s %-20s %-10s${STOPUNLINE}\n" "Directory" "Perms" "Owner:Group" "Note"
+    
+    IFS=: read -ra dirs <<< "$PATH"
+    for dir in "${dirs[@]}"; do
+        [ -d "$dir" ] || continue
+
+        perms=$(stat -c "%A" "$dir")
+        owner_g=$(stat -c "%U:%G" "$dir")
+        note=""
+
+        # Check if world-writable (other write bit set)
+        if [ -w "$dir" ] && [ "${perms:8:1}" = "w" ]; then
+            note="${BPURP}WORLD-WRITABLE${RESET}"
+            printf "    ↳ ${RED}%-40s %-15s %-20s ${RESET}%-10s\n" "$dir" "$perms" "$owner_g" "$note"
+        elif [ -w "$dir" ]; then
+            note="Writable"
+            printf "    ↳ ${YELLOW}%-40s %-15s %-20s %-10s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+        else
+            printf "    ↳ %-40s %-15s %-20s %-10s\n" "$dir" "$perms" "$owner_g" "$note"
+        fi
+    done
+    printf "\n================ End of list =================== \n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_sourced_files
+# Purpose: display ALL files that are sourced.
+#------------------------------------------------------------------------
+_ta_sourced_files() {
+    _ta_sourcedtree
+    printf "====== Sourced File Inspection (Mode: -s) ======\n\n"
+    printf "├─ Searching for files that have been sourced into the enviroment automatically\n" 
+    printf "    ↳ %sDiscovered the following files%s:\n" "$UNLINE" "$STOPUNLINE"
+
+    for file in "${__TA_SOURCED_FILES_LIST[@]}"; do
+        printf "    ↳ ${CYAN}%s${RESET}\n" "$file" 
+    done
+    printf "\n================ End of list =================== \n"
+}        
+
+#------------------------------------------------------------------------
+# Function: _ta_show_shadowing
+# Purpose : Display path shadowing of a command
+#------------------------------------------------------------------------
+_ta_show_shadowing() {
+    local cmd="$1" cmdpath="$2"
+    local shad=() 
+    local dir
+
+    IFS=':' read -ra PATH_ARR <<< "$PATH"
+    for dir in "${PATH_ARR[@]}"; do
+        [[ -x "$dir/$cmd" ]] || continue
+        [[ "$dir/$cmd" == "$cmdpath" ]] && continue
+        shad+=("$dir/$cmd")   
+    done
+
+    (( ${#shad[0]} == 0 )) && return 0
+
+    printf "%s    ↳ Shadowed versions:\n" "$indent"
+
+    local s
+for s in "${shad[@]}"; do
+    printf "%s    │    ${CYAN}%s${RESET}\n" "$indent" "$s"
+done
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_lookup_package  # usage: _ta_lookup_package "$cmd_path" "$indent"
+# Purpose : Lookup package info for a given command path
+#------------------------------------------------------------------------
+_ta_lookup_package() {
+    local cmd_path="$1"
+    local indent="${2:-}"  # optional indentation
+    local pkg_mgr pkg_name pkg_lines=()
+
+    pkg_mgr=$(_ta_detect_pkg_manager)
+    [[ -z "$pkg_mgr" ]] && return 1  # no package manager detected
+
+    case "$pkg_mgr" in
+        dpkg)
+            pkg_name=$(dpkg -S "$cmd_path" 2>/dev/null | cut -d: -f1 | head -n1)
+            if [[ -n "$pkg_name" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                    < <(dpkg-query -W -f='${Package}\n${Version}\n${Maintainer}\n${Description}\n' "$pkg_name" 2>/dev/null)
+            fi
+            ;;
+        rpm)
+            pkg_name=$(rpm -qf "$cmd_path" 2>/dev/null)
+            if [[ -n "$pkg_name" && "$pkg_name" != "file $cmd_path is not owned by any package" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                    < <(rpm -qi "$pkg_name" | awk '
+                    NR==1 { pkg=$3 }
+                    NR==2 { ver=$3 }
+                    /^Vendor/ {
+                    vendor = $3 " " $4      # space between $3 and $4
+                    }
+                    /^Summary/ {
+                    # print from field 3 to end
+                    desc = substr($0, index($0, $3))
+                    }
+                    END {
+                    print pkg
+                    print ver
+                    print vendor
+                    print desc
+                    }
+                ')
+            fi
+            ;;   
+        pacman)
+            pkg_name=$(pacman -Qo "$cmd_path" 2>/dev/null | awk '{print $5}')
+            if [[ -n "$pkg_name" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                < <(pacman -Qi "$pkg_name" | awk -F': *' '
+                    /^Name/        { name=$2 }
+                    /^Version/     { ver=$2 }
+                    /^Packager/    { maint=$2 }
+                    /^Description/ { desc=$2 }
+                    END {
+                        print name
+                        print ver
+                        print maint
+                        print desc
+                    }
+               ')
+           fi
+           ;;
+    esac
+
+    # Print package info if available   ----works for apt and rpm
+    if [[ -n "${pkg_lines[0]}" ]]; then
+        printf "%s    ↳ Package Info:\n" "$indent"
+        printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[0]}"
+        printf "%s    ⎟    Version: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[1]}"
+        printf "%s    ⎟    Maintainer: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[2]}"
+        printf "%s    ⎟    Description: ${CYAN}%s${RESET}\n" "$indent" "${pkg_lines[3]}"
+    fi
+}
+
+# Detect package manager once
+_ta_detect_pkg_manager() {
+    if command -v dpkg &>/dev/null; then
+        echo "dpkg"
+    elif command -v rpm &>/dev/null; then
+        echo "rpm"
+    elif command -v pacman &>/dev/null; then
+        echo "pacman"
+    else
+        echo ""
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_verify_package  # usage: _ta_verify_package "$cmd_path" "$indent"
+# Purpose : verify package for a given command
+#------------------------------------------------------------------------
+_ta_verify_package() {
+
+    local cmd="$1"
+    local pkg_mgr pkg_name pkg_lines=()
+    local sha pkg verify status="${GREEN}CLEAN${RESET}"
+    
+    ctype=$(type -t -- "$cmd" 2>/dev/null)
+    if [[ -z "$ctype" ]]; then
+        printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$indent" "$cmd"
+        printf "%s    ↳ Check your spelling and try again\n\n" "$indent" 
+        return 1
+    fi
+
+if [[ "$ctype" == "file" ]]; then
+
+    cmd_path=$(command -v "$cmd") 
+    cmd_real=$(readlink -f "$cmd_path" 2>/dev/null || echo "$cmd_path")
+    
+    sha=$(sha256sum "$cmd_real" 2>/dev/null | awk '{print $1}')
+    pkg_mgr=$(_ta_detect_pkg_manager)
+    [[ -z "$pkg_mgr" ]] && return 1  # no package manager detected
+
+    case "$pkg_mgr" in
+        dpkg)
+            pkg=$(dpkg -S "$cmd_real" 2>/dev/null | cut -d: -f1)
+            if [[ -n "$pkg" ]]; then
+                verify=$(dpkg -V "$pkg" | grep -F "$cmd_real")
+            fi
+            ;;
+        rpm)
+            if pkg=$(rpm -qf "$cmd_real" 2>/dev/null); then
+                verify=$(rpm -V "$pkg" | grep -F "$cmd_real")
+            fi
+            ;;   
+        pacman)
+            pkg=$(pacman -Qo "$cmd_real" 2>/dev/null | cut -d' ' -f5)
+            if [[ -n "$pkg" ]]; then
+                verify=$(pacman -Qk "$pkg" 2>/dev/null | grep -F "$cmd_real")
+            fi
+            ;;
+    esac
+
+    if [[ -n "$verify" ]]; then
+        status="${RED}TAMPERED${RESET}"
+    elif [[ -z "$pkg" ]]; then
+        status="${YELLOW}User Installed${RESET}"
+    fi
+
+    printf "Package Integrity:\n"
+    printf " ├─ Package: %s\n" "${pkg:-none}"
+    printf " ├─ Path: %s\n" "$cmd_real"
+    printf " ├─ SHA256: %s\n" "$sha"    
+    printf " └─ Status: %s\n" "$status"
+fi    
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_show_hash  # usage: _ta_show_hash "$indent" "$cmd_path"
+# Purpose : calc hashes
+#------------------------------------------------------------------------
+_ta_show_hash() {
+    local indent="$1"
+    local cmd="$2"
+    local ctype 
+    local hash=""
+    ctype=$(type -t -- "$cmd" 2>/dev/null)
+    
+    case "$ctype" in
+        alias)
+            # hash the resolved alias string
+            hash=$(alias "$cmd" 2>/dev/null | awk -F"=" '{print $2}' | sha256sum | awk '{print $1}')
+            ;;
+        function)
+            # hash the function body
+            hash=$(declare -f "$cmd" | sha256sum | awk '{print $1}')
+            ;;
+        file)
+            local path
+            path=$(command -v "$cmd")
+            [[ -x "$path" ]] && hash=$(sha256sum "$path" | awk '{print $1}')
+            ;;
+    esac
+
+    [[ -n "$hash" ]] && printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$indent" "$hash"
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_display_sxid_scan
+# Purpose : scan for SUID / SGID binaries and World-Writable directories 
+#------------------------------------------------------------------------
+_ta_display_sxid_scan() {
+    printf "=== SUID/SGID and W-W directories (Mode: -G) ===\n\n"
+    printf "├─ SUID Binaries (Identity Escalation)\n"
+    _ta_suid_threat_scan
+    printf "├─ SGID Binaries (Group Amplification)\n"
+    _ta_sgid_threat_scan
+    printf "├─ World-Writable Directories (Potential Injection Points)\n"
+    _ta_world_writable_scan
+    printf "\n================ End of list =================== \n"
+}
+
+
+#------------------------------------------------------------------------
+# Function: _ta_suid_threat_scan
+# Purpose : Scan for SUID gtfo risk binaries
+#------------------------------------------------------------------------
+_ta_suid_threat_scan() {
+    printf "├─ Scanning -- SUID threat assessment:\n"
+
+while IFS= read -r hit; do
+    _ta_threat_analyze_binary "$hit"
+done < <(find / -perm -4000 -type f 2>/dev/null)
+}
+
+declare -A THREAT_SIGS=(
+  # High confidence: trivial or near-trivial exploitation
+  [bash]="shell exec|high"
+  [sh]="shell exec|high"
+  [dash]="shell exec|high"
+  [find]="exec file-write|high"
+  [perl]="exec shell|high"
+  [python]="exec shell|high"
+  [nmap]="shell exec|high"
+  [socat]="shell exec|high"
+
+  # Medium confidence: common but situational
+  [env]="exec path-hijack|medium"
+  [awk]="exec|medium"
+  [sed]="file-write|medium"
+  [tar]="file-write|medium"
+  [openssl]="exec file-write|medium"
+  [tee]="file-write|medium"
+  [cp]="file-write|medium"
+  
+  # Low confidence: interactive / escape-based
+  [less]="shell file-read|low"
+  [more]="file-read|low"
+  [man]="shell|low"
+  [vi]="shell|low"
+  [vim]="shell file-read|low"
+  [ftp]="shell|low"
+)
+
+    #-----------------------------------------------------------
+    # Helper: _ta_threat_detect
+_ta_threat_detect() {
+    local bin="$1"
+    local sig prims confidence
+    local name
+
+    declare -A found=()
+    name=$(basename "$bin")
+    
+    case "$name" in
+        su|sudo|passwd|chsh|chfn|newgrp|gpasswd)
+        found[auth-impact]=1
+        ;;
+    esac
+
+    # ---- static signatures ----
+    if [[ -n "${THREAT_SIGS[$name]}" ]]; then
+        sig="${THREAT_SIGS[$name]}"
+        IFS='|' read -r prims confidence <<< "$sig"
+        for p in $prims; do
+            found["$p"]=1
+        done
+        [[ -n "$confidence" ]] && found["confidence:$confidence"]=1
+    fi
+
+    # ---- strings-based heuristics ----
+    local s
+    s=$(strings "$bin" 2>/dev/null)
+    
+    grep -qiE 'argv\[|getopt|getopt_long|scanf|fgets|gets' <<<"$s" && found[user-input]=1
+    grep -qiE 'system\(|execv|execl|popen' <<<"$s" && found[user-exec]=1
+    grep -qiE '\b(sh|bash|dash)\b' <<<"$s" && found[shell]=1
+    grep -qiE '\-exec\b|\-c\b|system\(' <<<"$s" && found[exec]=1
+    grep -qiE '\b(open|read|cat|less|more)\b' <<<"$s" && found[file-read]=1
+    grep -qiE '\b(write|output|tee|save)\b' <<<"$s" && found[file-write]=1
+    grep -qiE 'execvp|system|popen' <<<"$s" && ! grep -qiE 'clearenv|secure_path|setenv.*PATH' <<<"$s" &&
+        found[path-hijack]=1
+    grep -qiE 'EDITOR=|PAGER=|PATH=' <<<"$s" && found[env-inject]=1
+    grep -qiE 'set(res)?uid|seteuid|setreuid|setgid|setregid' <<<"$s" && found[priv-drop]=1
+    
+    if [[ -n "${found[priv-drop]}" ]]; then
+        # privilege-managed binaries
+        unset 'found[path-hijack]'
+        unset 'found[shell]'
+        unset 'found[exec]'
+    fi
+   
+    if [[ -n "${found[shell]}" && -z "${found[user-input]}" ]]; then
+        unset 'found[shell]'
+        found[shell-internal]=1
+    fi
+
+    if [[ -n "${found[exec]}" && -z "${found[user-input]}" ]]; then
+        unset 'found[exec]'
+        found[exec-internal]=1
+    fi
+
+    # ---- output ----
+for k in shell exec user-input auth-impact \
+         file-write path-hijack env-inject file-read \
+         confidence:high confidence:medium; do
+    [[ -n "${found[$k]}" ]] && printf "%s " "$k"
+done
+
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ta_threat_score
+_ta_threat_score() {
+    local prims="$1"
+    local score=0
+
+[[ $prims == *shell* && $prims == *user-input* ]] && ((score+=6))
+[[ $prims == *exec*  && $prims == *user-input* ]] && ((score+=5))
+[[ $prims == *file-write* ]] && ((score+=3))
+[[ $prims == *path-hijack* ]] && ((score+=3))
+[[ $prims == *env-inject* ]] && ((score+=2))
+[[ $prims == *file-read* ]] && ((score+=1))
+[[ $prims == *shell-internal* ]] && ((score+=1))
+[[ $prims == *exec-internal*  ]] && ((score+=1))
+[[ $prims == *confidence:high* ]]   && ((score+=2))
+[[ $prims == *confidence:medium* ]] && ((score+=1))
+[[ $prims == *auth-impact* ]] && ((score+=2))
+[[ $prims == *priv-drop* ]] && class="managed"
+    
+    echo "$score" "$class"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ta_threat_analyze_binary
+_ta_threat_analyze_binary() {
+    local bin="$1"
+    local prims score class
+
+    prims=$(_ta_threat_detect "$bin")
+    score=$(_ta_threat_score "$prims")
+
+    if [[ $score -ge 9 ]]; then
+        class="${RED}critical${RESET}"
+    elif [[ $score -ge 5 ]]; then
+        class="${YELLOW}interesting${RESET}"
+    elif [[ $score -ge 1 ]]; then
+        class="low"
+    else
+        class="none"
+    fi
+
+    printf "   ${CYAN}%s${RESET}\n" "$bin"
+    printf "       class: %s\n" "$class"
+    printf "       primitives: %s\n" "$prims"
+
+    if [[ $score -ge 9 ]]; then
+        printf "       risk score: ${RED}%s HIGH RISK – Requires review${RESET}\n\n" "$score"
+    elif [[ $score -ge 5 ]]; then
+        printf "       risk score: ${YELLOW}%s MEDIUM RISK – Potential concern${RESET}\n\n" "$score"
+    else
+        printf "       risk score: ${YELLOW}%s MEDIUM RISK – Review recommended${RESET}\n\n" "$score"
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ta_sgid_threat_scan
+# Purpose : Scan for SGID risk binaries
+#------------------------------------------------------------------------
+_ta_sgid_threat_scan() {
+    printf "├─ Scanning for SGID amplification risk:\n"
+
+    while IFS= read -r hit; do
+        _ta_sgid_threat_analyze_binary "$hit"
+    done < <(find / -perm -2000 -type f 2>/dev/null)
+}
+
+#-----------------------------------------------------------
+# Helper: _ta_sgid_threat_detect
+_ta_sgid_threat_detect() {
+    local bin="$1"
+    local sig prims confidence
+    local name
+
+    declare -A found=()
+    name=$(basename "$bin")
+
+    # ---- group-sensitive detection ----
+    local gid group
+    gid=$(stat -c %g "$bin")
+    group=$(getent group "$gid" | cut -d: -f1)
+
+    case "$group" in
+        shadow|adm|disk|docker|systemd-journal|utmp)
+            found[group-sensitive]=1
+            ;;
+    esac
+
+    # ---- strings heuristics (optional / SUID style) ----
+    local s
+    s=$(strings "$bin" 2>/dev/null)
+
+    grep -qiE 'argv\[|getopt|getopt_long|scanf|fgets|gets' <<<"$s" && found[user-input]=1
+    grep -qiE 'system\(|execv|execl|popen' <<<"$s" && found[user-exec]=1
+    grep -qiE '\b(sh|bash|dash)\b' <<<"$s" && found[shell]=1
+    grep -qiE '\b(open|read|cat|less|more)\b' <<<"$s" && found[file-read]=1
+    grep -qiE '\b(write|output|tee|save)\b' <<<"$s" && found[file-write]=1
+    grep -qiE 'EDITOR=|PAGER=|PATH=' <<<"$s" && found[env-inject]=1
+    grep -qiE 'setgid|setregid' <<<"$s" && found[priv-drop]=1
+
+    if [[ -n "${found[priv-drop]}" ]]; then
+        unset 'found[path-hijack]'
+        unset 'found[shell]'
+        unset 'found[exec]'
+    fi
+
+    [[ -n "${found[shell]}" && -z "${found[user-input]}" ]] && { unset 'found[shell]'; found[shell-internal]=1; }
+    [[ -n "${found[exec]}" && -z "${found[user-input]}" ]] && { unset 'found[exec]'; found[exec-internal]=1; }
+
+    # ---- output primitives ----
+    local key
+    local out=()
+
+    for key in shell exec user-input auth-impact file-write path-hijack env-inject file-read \
+           group-sensitive confidence:high confidence:medium; do
+        [[ -n "${found[$key]}" ]] && out+=("$key")
+    done
+
+    printf '%s ' "${out[@]}"
+    echo
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ta_sgid_threat_score
+_ta_sgid_threat_score() {
+    local prims="$1"
+    local score=0
+    local class=""
+
+    [[ $prims == *group-sensitive* ]] && ((score+=4))
+    [[ $prims == *file-write* ]] && ((score+=3))
+    [[ $prims == *file-read* ]] && ((score+=2))
+    [[ $prims == *auth-impact* ]] && ((score+=2))
+    [[ $prims == *env-inject* ]] && ((score+=1))
+    [[ $prims == *priv-drop* ]] && class="managed"
+
+    echo "$score" "$class"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ta_sgid_threat_analyze_binary
+_ta_sgid_threat_analyze_binary() {
+    local bin="$1"
+    local prims score class
+
+    prims=$(_ta_sgid_threat_detect "$bin")
+    score=$(_ta_sgid_threat_score "$prims")
+
+    if [[ $score -ge 9 ]]; then
+        class="${RED}amplification${RESET}"
+    elif [[ $score -ge 5 ]]; then
+        class="${YELLOW}interesting${RESET}"
+    elif [[ $score -ge 1 ]]; then
+        class="low"
+    else
+        class="none"
+    fi
+    
+    local gid group
+    gid=$(stat -c %g "$bin")
+    group=$(getent group "$gid" | cut -d: -f1)
+
+    printf "   ${CYAN}%s${RESET}\n" "$bin"
+    printf "       class: %s\n" "$class"
+    printf "       group: %s\n" "$group"
+    printf "       primitives: %s\n" "$prims"
+
+    if [[ $score -ge 8 ]]; then
+        printf "       risk score: ${RED}%s HIGH RISK${RESET}\n\n" "$score"
+    elif [[ $score -ge 5 ]]; then
+        printf "       risk score: ${YELLOW}%s MEDIUM RISK${RESET}\n\n" "$score"
+    else
+        printf "       risk score: %s\n\n" "$score"
+    fi
+}
+
+#-----------------------------------------------------------
+# Function: _ta_world_writable_scan
+# Purpose : Identify world-writable directories as injection surfaces
+#-----------------------------------------------------------
+_ta_world_writable_scan() {
+    local dir perms owner group prims score class
+
+    printf "├─ Scanning for World-Writable directories:\n"
+
+    # Limit to high-risk locations for speed, plus /var/tmp
+    local scan_dirs=("/tmp" "/var/tmp" "/run" "/dev/shm")
+    
+    for root in "${scan_dirs[@]}"; do
+        [ -d "$root" ] || continue
+        while IFS= read -r dir; do
+            prims=()
+            score=0
+
+            # permissions and ownership
+            perms=$(stat -c "%A" "$dir" 2>/dev/null)
+            owner=$(stat -c "%U" "$dir" 2>/dev/null)
+            group=$(stat -c "%G" "$dir" 2>/dev/null)
+
+            prims+=(world-writable)
+            ((score+=1))
+
+            # sticky bit
+            if [[ "$perms" == *t ]]; then
+                prims+=(sticky)
+            else
+                prims+=(no-sticky)
+                ((score+=3))
+            fi
+
+            # ownership
+            if [[ "$owner" == "root" ]]; then
+                prims+=(root-owned)
+                ((score+=1))
+            fi
+
+            # runtime vs persistent
+            case "$dir" in
+                /tmp|/run/*|/dev/shm*)
+                    prims+=(runtime-dir)
+                    ;;
+                /var/tmp*)
+                    prims+=(persistent)
+                    ((score+=2))
+                    ;;
+                *)
+                    prims+=(persistent)
+                    ((score+=2))
+                    ;;
+            esac
+
+            # path injection potential
+            case "$dir" in
+                /tmp|/var/tmp|/dev/shm)
+                    prims+=(path-inject)
+                    ((score+=1))
+                    ;;
+            esac
+
+            # symlink abuse potential
+            prims+=(symlink-attack)
+            ((score+=1))
+            
+# path injection potential
+if grep -qE "(^|:)$dir(:|$)" <<<"$PATH"; then
+    prims+=(path-inject)
+    ((score+=1))
+fi
+            # classification
+            if (( score >= 9 )); then
+                class="${RED}critical${RESET}"
+            elif (( score >= 3 )); then
+                class="${YELLOW}interesting${RESET}"
+            else
+                class="low"
+            fi
+
+            # Output
+            printf "   ${CYAN}%s${RESET}\n" "$dir"
+            printf "       owner: %s:%s\n" "$owner" "$group"
+            printf "       perms: %s\n" "$perms"
+            printf "       primitives: %s\n" "${prims[*]}"
+            printf "       risk score: %s (%s)\n\n" "$score" "$class"
+
+        done < <(find "$root" -type d -perm -0002 2>/dev/null | sort -u)
+    done
+}
+
+#------------------------------------------------------------------------
+# End of script
