@@ -1,3 +1,10 @@
+V1.0.72
+     removed heuristic threat assesment option -- too subjective for my liking 
+     ca needs to stick to defensible facts.
+     alias flag -a now enumerate all aliases
+     function flag -f now enumerate all user-functions
+     verbose function flag -fv now enumerate ALL functions in the enviroment
+
 V1.0.71
      added support for file hyperlinks for aliases functions and scripts.
      Terminals that support hyperlinks (iTerm2, Kitty, GNOME Terminal) will make it clickable.  on my system they open with gedit
