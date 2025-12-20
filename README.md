@@ -10,7 +10,7 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.71-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-1.0.72-blue)](https://github.com/JB63134/bash_ca/releases) 
 
    
 ---
