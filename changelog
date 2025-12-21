@@ -1,3 +1,12 @@
+V1.0.75
+     new Command Resolution Trace
+     shows the order Bash would resolve a command
+     Highlights shadowing (e.g., alias overriding a builtin)
+     UI needs a lot of cleanup, but it works and im tired.
+
+     try ca --trace awk
+     PATH code further refined
+
 V1.0.72
      removed heuristic threat assesment option -- too subjective for my liking 
      ca needs to stick to defensible facts.
