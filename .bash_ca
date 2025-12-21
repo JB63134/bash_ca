@@ -775,7 +775,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.75 — Bash Command Analyzer
+     ca v1.0.77 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
