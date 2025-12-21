@@ -95,7 +95,7 @@ If no command is provided, `ca` will analyze your **most recent command**.
 | `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories         |
 | `-V`, `--verify`     | Verify package integrity                                           |
 | `--fzf`              | Interactively search for commands (requires `fzf`)                 |
-
+| `-t` `--trace`       | Command resolution order mapping                                   |
 ---
 
 ## Screenshots / Output Preview
