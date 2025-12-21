@@ -86,7 +86,7 @@ If no command is provided, `ca` will analyze your **most recent command**.
 | -------------------- | ------------------------------------------------------------------ |
 | `-h`, `--help`       | Show help text                                                     |
 | `-v`, `--version`    | Show version information                                           |
-| `-f`, `--functions`  | list all user functions in the enviroment                          |
+| `-f`, `--functions`  | list all USER functions in the enviroment                          |
 | `-fv`,`--funverb`    | Verbose - list ALL functions in the enviroment                     | 
 | `-a`, `--aliases`    | list all aliases in the enviroment                                 |
 | `-s`, `--sourced`    | List all sourced files in your environment                         |
