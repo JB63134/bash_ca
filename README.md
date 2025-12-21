@@ -100,6 +100,9 @@ If no command is provided, `ca` will analyze your **most recent command**.
 
 ## Screenshots / Output Preview
 
+![Traec](images/trace.png)
+![package](images/package.png)
+![af](images/af.png)
 ![Source and $Path modes](images/source-path.png)
 ![Overridden commands](images/override.png)
 ![Builtins and Keywords](images/builtin-keyword.png)
