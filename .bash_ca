@@ -746,16 +746,19 @@ _ca_usage() {
      Analyze aliases, builtins, keywords, functions, scripts or binaries.
 
      Options:
-           -h --help or h      Show this help text.
-           -v --version        Show version information.
-           -f --fzf            Use fzf to interactivly search for commands     
-           -s --sourced        List all sourced files in the enviroment.
-           -o --overridden     List all commands that override another command in the enviroment.
-           -p --path           List all directories in $PATH and highlight writable directories.
-           -S --scan           List SUID binaries, SGID binaries and World Writable directories.
-           -t --trace          Command resolution order mapping
-           -V --verify         Verify package integrity, supports dpkg rpm and pacman.
-           
+           -h --help or h       Show this help text.
+           -v --version         Show version information.
+           -f --functions	list all USER functions in the enviroment
+           -fv --funverb	Verbose - list ALL functions in the enviroment
+           -a --aliases 	list all aliases in the enviroment
+           -s --sourced         List all sourced files in the enviroment.
+           -o --overridden      List all commands that override another command in the enviroment.
+           -p --path            List all directories in $PATH and highlight writable directories.
+           -S --scan            List SUID binaries, SGID binaries and World Writable directories.
+           -t --trace           Command resolution order mapping
+           -V --verify          Verify package integrity, supports dpkg rpm and pacman.
+           --fzf                Use fzf to interactivly search for commands   
+             
      Examples:
            ca                   # Automatically analyzes your most recent command
            ca awk               # Analyzes 'awk'
