@@ -1,17 +1,16 @@
 
 # ca – Bash Command Analyzer
+---
+
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.0.80-blue)](https://github.com/JB63134/bash_ca/releases) 
+
 
 **ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, keywords, functions, text executables, and external binaries. Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all command resolution logic into a single analysis engine.
 
 Requires: Bash ≥ V4.4 and GNU utils  
 Package Lookup: supports dpkg, rpm, and pacman   
 Sourced file detection: supports Debian and Fedora / RHEL style setups  
-
----
-
-[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.77-blue)](https://github.com/JB63134/bash_ca/releases) 
-
    
 ---
 
