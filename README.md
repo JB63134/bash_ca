@@ -1,5 +1,5 @@
 
-# ca – Bash Command Analyzer
+# ca – Bash Command Autopsy
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
