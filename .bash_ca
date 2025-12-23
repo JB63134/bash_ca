@@ -37,6 +37,12 @@ ca() {
     local depth=${2:-0}
     local cmdline="$*"
     
+    depth=${2:-0}                # default to 0 if not provided
+    
+    if ! [[ "$depth" =~ ^[0-9]+$ ]]; then
+        depth=0
+    fi
+    
     CA_INDENT=$(printf "%*s" $((depth * 4)) "")
     
     # -------------------------
@@ -49,6 +55,7 @@ ca() {
         CYAN=$(tput setaf 6)
         YELLOW=$(tput setaf 11)
         BPURP=$(tput setaf 13)
+        GREY=$(tput setaf 245)     # proper neutral gray
         RESET=$(tput sgr0)
         UNLINE=$(tput smul)
         STOPUNLINE=$(tput rmul)
@@ -59,6 +66,8 @@ ca() {
         CYAN='\033[36m'
         YELLOW='\033[93m'
         BPURP='\033[95m'
+        GREY='\033[90m'  # safe gray
+#        GREY='\033[38;5;245m'  # proper neutral gray
         RESET='\033[0m'
         UNLINE='\033[4m'
         STOPUNLINE='\033[0m'
@@ -69,6 +78,7 @@ ca() {
     : "${CYAN:=}"
     : "${YELLOW:=}"
     : "${BPURP:=}"
+    : "${GREY:=}"
     : "${RESET:=}"
     : "${UNLINE:=}"
     : "${STOPUNLINE:=}"
@@ -422,9 +432,11 @@ fi
         # Get the alias expansion (strip surrounding quotes)
         local raw
         raw=$(alias "$cmd")
-        alias_expansion=${raw#*=}         # remove 'name='
-        alias_expansion=${alias_expansion:1:${#alias_expansion}-2}   # trim outer quotes
-        alias_expansion=$(_ca_expand_vars "$alias_expansion")
+        quote=${raw#*=}         # remove 'name='
+        quote="${quote:0:1}"      # first character → "'"
+       result="${raw#*"${quote}"}"  # removes everything up to first quote → "ls -alF'"
+       result="${result%"${quote}"}"        # removes trailing "'" → "ls -alF"
+        alias_expansion=$(_h_expand_vars "$result")
         alias_def=$(alias "$cmd")
         
         printf "%s├─ ${CYAN}'%s' ${RESET}is an alias:\n" "$CA_INDENT" "$cmd"
@@ -775,7 +787,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.77 — Bash Command Analyzer
+     ca v1.0.80 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -1733,7 +1745,12 @@ _ca_sourced_files() {
     printf "    ↳ %sDiscovered the following files%s:\n" "$UNLINE" "$STOPUNLINE"
 
     for file in "${__CA_SOURCED_FILES_LIST[@]}"; do
-        printf "    ↳ ${CYAN}%s${RESET}\n" "$file" 
+      #  printf "    ↳ ${CYAN}%s${RESET}\n" "$file" 
+        # Build clickable line
+        local clickable_text
+        clickable_text=$(printf "${CYAN}%s${RESET}" "$file")
+        # Print clickable link
+        printf "    ↳ \e]8;;file://%s\a%s\e]8;;\a\n" "$file" "$clickable_text"
     done
     printf "\n================ End of list =================== \n"
 }        
@@ -1949,16 +1966,24 @@ _ca_show_hash() {
 # Purpose : Identify user writable commands/scripts/binaries
 #-----------------------------------------------------------
 _ca_list_user_bin() {
-    echo "=== User-writable commands ==="
+    CA_INDENT=$(printf "%*s" $((1 * 4)) "")
+    printf "=== User writable scripts/binaries (Mode: -u) ===\n\n"
     _ca_restore_path
     for dir in ${PATH//:/ }; do
         [ -d "$dir" ] || continue
         [[ "$dir" =~ ^/usr|^/bin ]] && continue
         for f in "$dir"/*; do
             [ -x "$f" ] || continue
-            echo "$(basename "$f") -> $f"
+            local fn
+            fn=$(basename "$f")
+            # Build clickable line with function name, file, line
+            local clickable_text
+            clickable_text=$(printf "${CYAN}(%s)${RESET}" "$f")
+            # Print clickable link
+            printf "%s %-25s  -- Defined in: \e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$fn" "$f" "$clickable_text"
         done
     done
+        printf "\n================ End of list =================== \n"
 }
 
 # ----------------------------------------------------------------------
@@ -1968,7 +1993,7 @@ _ca_list_user_bin() {
 _ca_function() {
     CA_INDENT=$(printf "%*s" $((depth * 4)) "")
     local verbose=${verbose:-0}
-
+    printf "==== List of shell functions (Mode: -f -fv) ====\n\n"
     local fn
     if [[ "$verbose" == 1 ]]; then
         # Show all functions including internal
@@ -1981,13 +2006,14 @@ _ca_function() {
             _ca_print_fn "$fn" "$CA_INDENT"
         done
     fi
+            printf "\n================ End of list =================== \n"
 }
 
 # ----------------------------------------------------------------------
 # Helper: print a single function line with clickable link
 _ca_print_fn() {
     local fn="$1"
-    local CA_INDENT="$2"
+    CA_INDENT=$(printf "%*s" $((1 * 4)) "")
     local was_extdebug=0 _ line file
 
     # Enable extdebug to get file/line
@@ -2004,21 +2030,21 @@ _ca_print_fn() {
 
     # Build clickable line with function name, file, line
     local clickable_text
-    clickable_text=$(printf "%s%s  -- Defined in: %s (line %s)" \
-        "$CA_INDENT" "$fn" "$file" "$line")
-
+    clickable_text=$(printf "${CYAN}(%s : line %s)${RESET}" \
+            "$file" "$line")
+            
     # Print clickable link
-    printf "\e]8;;file://%s\a%s\e]8;;\a\n" "$file" "$clickable_text"
+    printf "%s %-15s  -- Defined in: \e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$fn" "$file" "$clickable_text"
 }
-
+                
 # ----------------------------------------------------------------------
 # Function: _ca_aliases
 # Builds a clickable list of shell aliases with file links
 # ----------------------------------------------------------------------
 _ca_aliases() {
- 
+       printf "======= List of shell aliases (Mode: -a) =======\n\n"
     local CA_INDENT
-    CA_INDENT=$(printf "%*s" $((depth * 4)) "")
+    CA_INDENT=$(printf "%*s" $((1 * 4)) "")
 
     # Ensure sourced files list exists
     _ca_ensure_sourcedtree
@@ -2050,15 +2076,16 @@ _ca_aliases() {
 
         # Build clickable line
         local clickable_text
-        clickable_text=$(printf "%s%s  -- Defined in: %s (line %s)" \
-            "$CA_INDENT" "$alias_name" "$file" "$line_number")
+        clickable_text=$(printf "${CYAN}(%s : line %s)${RESET}" \
+            "$file" "$line_number")
 
         # Print entire line as clickable link
-        printf "\e]8;;file://%s\a%s\e]8;;\a\n" "$file" "$clickable_text"
+        printf "%s %-10s  -- Defined in:\e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$alias_name" "$file" "$clickable_text"
     done
 
     # Restore nullglob if we changed it
     (( nullglob_was == 1 )) && shopt -u nullglob
+        printf "\n================ End of list =================== \n"
 }
 
 #------------------------------------------------------------------------
@@ -2072,7 +2099,7 @@ _ca_print_trace() {
     local -a res
     local winner=""
     local found_path=""
-    local alias_def="" file line
+    local alias_def="" file line quote result
 
     _ca_resolve_command "$cmd" res
 
@@ -2082,7 +2109,11 @@ _ca_print_trace() {
     printf "    ├─ Alias?\n"
     if [[ ${res[0]} == alias\|found* ]]; then
         alias_def="${res[0]#*|found|}"
-        printf "    ⎟    ↳ %s - found → %s\n" "$cmd" "$alias_def"
+        quote="${alias_def#*=}"   # removes everything up to '=' → "'ls -alF'"
+        quote="${quote:0:1}"      # first character → "'"
+        result="${alias_def#*"${quote}"}"  # removes everything up to first quote → "ls -alF'"
+        result="${result%"${quote}"}"      # removes trailing "'" → "ls -alF"          
+        printf "    ⎟    ↳ ${CYAN}%s - found → %s${RESET}\n" "$cmd" "$alias_def"
         winner="alias"
         bash_winner_type="alias"
         found_path="$cmd"
@@ -2091,29 +2122,34 @@ _ca_print_trace() {
     fi
     printf "    ⎟   \n" 
     
-    # 2. Function
-    printf "    ├─ Function?\n"
-    if [[ ${res[1]} == function\|found* ]]; then
-        IFS='|' read -r _ _ file line <<< "${res[1]}"
-        printf "    ⎟    ↳ %s - defined in %s:%s\n" "$cmd" "$file" "$line"
-        [[ -z $winner ]] && winner="function" && bash_winner_type="function"
-        [[ -z $found_path ]] && found_path="$cmd"
+   # 2. function
+printf "    ├─ Function?\n"
+if [[ ${res[1]} == function\|found* ]]; then
+    IFS='|' read -r _ _ file line <<< "${res[1]}"
+    if [[ -z $winner ]]; then
+        winner="function"
+        bash_winner_type="function"   
+        found_path="$cmd"
+        printf "    ⎟    ↳ ${CYAN}%s - found → ${RESET} (${CYAN}%s : line %s${RESET})\n" "$cmd" "$file" "$line"  
     else
-        printf "    ⎟    ↳ %s - not found\n" "$cmd"
+        printf "    ⎟    ↳ ${GREY}%s - found → (%s : line %s) [shadowed]${RESET}\n" "$cmd" "$file" "$line"
     fi
-    printf "    ⎟   \n"
+else
+    printf "    ⎟    ↳ %s - not found\n" "$cmd"
+fi
+printf "    ⎟   \n"
     
     # 3. Builtin
     printf "    ├─ Builtin?\n"
     if [[ ${res[2]} == builtin\|found ]]; then
         if [[ -z $winner ]]; then
-            printf "    ⎟    ↳ %s - enabled\n" "$cmd"
+            printf "    ⎟    ↳  ${CYAN}%s${RESET} - ${CYAN}enabled${RESET}\n" "$cmd"
             winner="builtin"
             bash_winner_type="builtin"
             [[ -z $found_path ]] && found_path="$cmd"
         else
             # builtin shadowed by alias or function
-            printf "    ⎟    ↳ %s - enabled [shadowed]\n" "$cmd"
+            printf "    ⎟    ↳ ${GREY}%s${RESET} - ${GREY}enabled [shadowed]${RESET}\n" "$cmd"
         fi
     else
         printf "    ⎟    ↳ %s - not found\n" "$cmd"
@@ -2124,12 +2160,12 @@ _ca_print_trace() {
 printf "    ├─ Keyword?\n"
 if [[ ${res[3]} == keyword\|found ]]; then
     if [[ -z $winner ]]; then
-        printf "    ⎟    ↳ %s - enabled\n" "$cmd"
+        printf "    ⎟    ↳ ${CYAN}%s${RESET} - ${CYAN}found${RESET}\n" "$cmd"
         winner="keyword"
         bash_winner_type="keyword"
         [[ -z $found_path ]] && found_path="$cmd"
     else
-        printf "    ⎟    ↳ %s - enabled [shadowed]\n" "$cmd"
+        printf "    ⎟    ↳ ${GREY}%s${RESET} - ${GREY}found [shadowed]${RESET}\n" "$cmd"
     fi
 else
     printf "    ⎟    ↳ %s - not found\n" "$cmd"
@@ -2139,33 +2175,45 @@ printf "    ⎟   \n"
     # 5. PATH
     printf "    ├─ \$PATH in order\n"
     for ((i=4; i<${#res[@]}; i++)); do
-        IFS='|' read -r kind dir state target <<< "${res[i]}"
+        IFS='|' read -r _ dir state target <<< "${res[i]}"
         case "$state" in
             notfound)
                 printf "    ⎟    ↳ %-24s %s - not found\n" "$dir" "$cmd"
                 ;;                
             file)
                 if [[ -z $found_path ]]; then
-                    printf "    ⎟    ↳ %-24s %s - found\n" "$dir" "$cmd"
+                    printf "    ⎟    ↳ %-24s ${CYAN}%s${RESET} - ${CYAN}found${RESET}\n" "$dir" "$cmd"
                     found_path="$dir/$cmd"
                     [[ -z $bash_winner_type ]] && path_winner=1
                 else
-                    printf "    ⎟    ↳ %-24s %s - found [shadowed]\n" "$dir" "$cmd"
+                    printf "    ⎟    ↳ %-24s ${GREY}%s${RESET} - ${GREY}found [shadowed]${RESET}\n" "$dir" "$cmd"
                 fi
                 ;;
             symlink)
                 if [[ -z $found_path ]]; then
-                    printf "    ⎟    ↳ %-24s %s - symlink found [link to %s]\n" \
+                    printf "    ⎟    ↳ %-24s ${CYAN}%s${RESET} - ${YELLOW}Symlink to [ %s ]${RESET}\n" \
                         "$dir" "$cmd" "$target"
                     found_path="$dir/$cmd"
                     [[ -z $bash_winner_type ]] && path_winner=1
                 else
-                    printf "    ⎟    ↳ %-24s %s - symlink found [shadowed]\n" "$dir" "$cmd"
+                    printf "    ⎟    ↳ %-24s ${GREY}%s${RESET} - ${GREY}Symlink [shadowed]${RESET}\n" "$dir" "$cmd"
                 fi
                 ;;
         esac
     done
     printf "    ⎟ \n"
+    
+    
+    # Determine if any PATH entry exists for this cmd
+local shadowed_file=0
+for ((i=4; i<${#res[@]}; i++)); do
+    IFS='|' read -r _ dir state target <<< "${res[i]}"
+    if [[ "$state" == "file" || "$state" == "symlink" ]]; then
+        shadowed_file=1
+        break
+    fi
+done
+    
 # Bash resolution target
 printf "    ├─ Bash resolution target:\n"
 if [[ -n $found_path ]]; then
@@ -2173,19 +2221,28 @@ if [[ -n $found_path ]]; then
     canonical=$(readlink -f -- "$found_path" 2>/dev/null || echo "$found_path")
     case "$bash_winner_type" in
         alias)
-            printf "    ⎟    ↳ Executed: %s (alias: %s)\n" "$found_path" "$alias_def"
+            printf "    ⎟    ↳ Executed: ${CYAN}Alias: %s${RESET} (${CYAN}%s${RESET})\n" "$found_path" "$alias_def"
             ;;
         function)
-            printf "    ⎟    ↳ Executed: %s (function in %s:%s)\n" "$found_path" "$file" "$line"
+            printf "    ⎟    ↳ Executed: ${CYAN}Function: %s${RESET} (${CYAN}%s : line %s${RESET})\n" "$found_path" "$file" "$line"
             ;;
         builtin)
-            printf "    ⎟    ↳ Executed: %s (builtin)\n" "$found_path"
+            printf "    ⎟    ↳ Executed: ${CYAN}%s${RESET} (${CYAN}builtin${RESET})\n" "$found_path"
+            ;;
+        keyword)        
+            # Always print keyword line
+            printf "    ⎟    ↳ Keyword: ${CYAN}%s${RESET}\n" "$cmd"
+
+            # Print shadow notice if a filesystem executable exists
+            if (( shadowed_file )); then
+                printf "    ⎟    ↳ Note: filesystem executables named ${CYAN}%s${RESET} are unreachable by bare invocation\n" "$cmd"
+            fi
             ;;
         *)
             if [[ "$found_path" != "$canonical" ]]; then
-                printf "    ⎟    ↳ Executed: %s  -  symlink to [%s]\n" "$found_path" "$canonical"
+                printf "    ⎟    ↳ Executed: ${CYAN}%s${RESET}  -  ${YELLOW}Symlink to [ %s ]${RESET}\n" "$found_path" "$canonical"
             else
-                printf "    ⎟    ↳ Executed: %s\n" "$found_path"
+                printf "    ⎟    ↳ Executed: ${CYAN}%s${RESET}\n" "$found_path"
             fi
             ;;
     esac
@@ -2193,6 +2250,8 @@ else
     printf "    ⎟    ↳ Executed: not found\n"
 fi
 printf "    ⎟ \n"
+
+
 # Kernel execution
 if (( path_winner )); then
 
@@ -2201,28 +2260,36 @@ if (( path_winner )); then
     local canonical
     canonical=$(readlink -f -- "$found_path" 2>/dev/null || echo "$found_path")
     if [[ "$found_path" != "$canonical" ]]; then
-        printf "    ⎟    ↳ symlink → %s\n" "$canonical"
+        printf "    ⎟    ↳ ${YELLOW}Symlink${RESET} → ${BPURP}%s${RESET}\n" "$canonical"
     else
-        printf "    ⎟    ↳ executable → %s\n" "$canonical"
+        printf "    ⎟    ↳ Executable → %s\n" "$canonical"
     fi
 
     # ELF interpreter
     if file "$canonical" 2>/dev/null | grep -q ELF; then
         local interp
         interp=$(readelf -l "$canonical" 2>/dev/null | awk '/interpreter/ {print $NF}')
-        [[ -n $interp ]] && printf "    ⎟    ↳ ELF interpreter: %s\n" "$interp"
+        [[ -n $interp ]] && printf "    ⎟    ↳ ELF interpreter: ${CYAN}%s${RESET}\n" "$interp"
     fi
 
     # Script shebang
     if head -1 "$canonical" 2>/dev/null | grep -q '^#!'; then
-        printf "    ⎟    ↳ shebang: %s\n" "$(head -1 "$canonical" | cut -c3-)"
+        printf "    ⎟    ↳ Shebang: ${CYAN}%s${RESET}\n" "$(head -1 "$canonical" | cut -c3-)"
     fi
 fi
 printf "    ⎟ \n"
-    printf "    ├──────────────────────────────────────────\n" "$CA_INDENT"
+ #  printf "    └──────────────────────────────────────────\n" 
+    printf "    ├──────────────────────────────────────────\n" 
 printf "    ⎟ \n"
 printf "    ├─  Analyzing %s\n" "$cmd"
-    ca "$cmd" $((depth + 1))
+
+depth=${2:-1}              # default to 1 if $2 is missing
+if ! [[ "$depth" =~ ^[0-9]+$ ]]; then
+    depth=1
+fi
+
+ca "$cmd" $((depth + 1))
+
 }
 
 #---------------------
@@ -2243,15 +2310,16 @@ _ca_resolve_command() {
     fi
 
     # Function
-    if [[ "$type_kind" == "function" ]]; then
-        local was_extdebug=0 line file
-        shopt -q extdebug || { shopt -s extdebug; was_extdebug=1; }
-        read -r _ line file <<< "$(declare -F "$cmd")"
-        (( was_extdebug )) && shopt -u extdebug
-        out_ref+=("function|found|$file|$line")
-    else
-        out_ref+=("function|notfound")
-    fi
+if declare -F "$cmd" &>/dev/null; then
+    local line file was_extdebug=0
+    shopt -q extdebug || { shopt -s extdebug; was_extdebug=1; }
+    read -r _ line file <<< "$(declare -F "$cmd")"
+    (( was_extdebug )) && shopt -u extdebug
+    [[ -z $file ]] && file="interactive shell"
+    out_ref+=("function|found|$file|$line")
+else
+    out_ref+=("function|notfound")
+fi
 
     # Builtin
 if compgen -b | grep -qx "$cmd"; then
