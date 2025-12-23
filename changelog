@@ -1,3 +1,6 @@
+V1.0.81
+     added -d --diff for shell options to show deviation from default
+
 V1.0.80
      UI/UX stuff.
      fixed bug in trace mode, shadowed functions are now reliably found
