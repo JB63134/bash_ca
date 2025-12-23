@@ -148,6 +148,7 @@ ca() {
     case "$cmd" in
         -h|--help) _ca_usage; return 0;;
         -v|--version) _ca_ver; return 0;;
+        -d|--diff) printf "\n"; _ca_bash_option_diff; return 0;;
         -a|--aliases) printf "\n"; _ca_aliases; return 0;;
         -f|--functions) printf "\n"; _ca_function; return 0;;
         -fv|--funverb) verbose=1; printf "\n"; _ca_function; return 0;;
@@ -787,7 +788,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.80 — Bash Command Analyzer
+     ca v1.0.81 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -2293,7 +2294,7 @@ ca "$cmd" $((depth + 1))
 }
 
 #---------------------
-# Helper function: resolve command
+# Helper function: _ca_resolve_command
 _ca_resolve_command() {
     local cmd="$1"
     local -n out_ref="$2"
@@ -2349,6 +2350,60 @@ fi
             out_ref+=("path|$d|notfound")
         fi
     done
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_bash_option_diff
+# Purpose: shell option diff from default state
+#------------------------------------------------------------------------
+_ca_bash_option_diff() {
+  local tmp_default tmp_current
+
+  tmp_default=$(mktemp)
+  tmp_current=$(mktemp)
+  
+#---------------------
+# Helper function:_ca_normalize
+_ca_normalize() {
+    awk '
+      # set -o output: name <tab> on|off
+      NF == 2 {
+        printf "set:%s=%s\n", $1, $2
+        next
+      }
+
+      # shopt -p output: shopt -s|-u name
+      $1 == "shopt" {
+        state = ($2 == "-s") ? "on" : "off"
+        printf "shopt:%s=%s\n", $3, state
+      }
+    '
+  }
+
+  bash --noprofile --norc -c '
+    set -o
+    shopt -p
+  ' | _ca_normalize | sort > "$tmp_default"
+
+  {
+    set -o
+    shopt -p
+  } | _ca_normalize | sort > "$tmp_current"
+
+  printf "===Changed shell options (default vs current)===\n\n"
+ 
+  join -t= -a2 -e missing -o 0,1.2,2.2 \
+    <(sort "$tmp_default") \
+    <(sort "$tmp_current") |
+  awk -F= '
+    $2 != $3 {
+      state = ($3 == "on") ? "ENABLED " : "DISABLED"
+      printf "  %-8s %s (%s → %s)\n", state, $1, $2, $3
+    }
+  '
+
+  rm -f "$tmp_default" "$tmp_current"
+  printf "\n================ End of list =================== \n"
 }
 
 #------------------------------------------------------------------------
