@@ -85,16 +85,19 @@ If no command is provided, `ca` will analyze your **most recent command**.
 | -------------------- | ------------------------------------------------------------------ |
 | `-h`, `--help`       | Show help text                                                     |
 | `-v`, `--version`    | Show version information                                           |
+| `-a`, `--aliases`    | list all aliases in the enviroment                                 |
 | `-f`, `--functions`  | list all USER functions in the enviroment                          |
 | `-fv`,`--funverb`    | Verbose - list ALL functions in the enviroment                     | 
-| `-a`, `--aliases`    | list all aliases in the enviroment                                 |
-| `-s`, `--sourced`    | List all sourced files in your environment                         |
+| `--fzf`              | Interactively search for commands (requires `fzf`)                 |
+| `-d`, `--diff`       |list shell options that have changed from default in the enviroment |
 | `-o`, `--overridden` | List commands that override others                                 |
 | `-p`, `--path`       | List all directories in `$PATH` and highlight writable directories |
+| `-s`, `--sourced`    | List all sourced files in your environment                         |
 | `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories         |
-| `-V`, `--verify`     | Verify package integrity                                           |
-| `--fzf`              | Interactively search for commands (requires `fzf`)                 |
 | `-t` `--trace`       | Command resolution order mapping                                   |
+| `-u`, `--user`       | List USER writable commands                                        |
+| `-V`, `--verify`     | Verify package integrity                                           |
+
 ---
 
 ## Screenshots / Output Preview
