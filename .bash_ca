@@ -105,7 +105,7 @@ ca() {
         # Greeting
         #--------------------------
         printf "\n╔══════════════════════════════════════════════╗\n"
-        printf "║  ca – Bash Command Analyzer                  ║\n"
+        printf "║  ca – Bash Command Autopsy                   ║\n"
         printf "╚══════════════════════════════════════════════╝\n"
         
         # -------------------------
@@ -148,17 +148,17 @@ ca() {
     case "$cmd" in
         -h|--help) _ca_usage; return 0;;
         -v|--version) _ca_ver; return 0;;
-        -d|--diff) printf "\n"; _ca_bash_option_diff; return 0;;
-        -a|--aliases) printf "\n"; _ca_aliases; return 0;;
+        -a|--aliases) printf "\n"; _ca_aliases; return 0;;  
         -f|--functions) printf "\n"; _ca_function; return 0;;
-        -fv|--funverb) verbose=1; printf "\n"; _ca_function; return 0;;
+        -fv|--funverb) verbose=1; printf "\n"; _ca_function; return 0;;           
+        -d|--diff) printf "\n"; _ca_bash_option_diff; return 0;;   
+        -o|--overridden) printf "\n"; _ca_overridden; return 0;;   
+        -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;   
         -s|--sourced) printf "\n"; _ca_sourced_files; return 0;;
         -S|--scan) printf "\n"; _ca_display_files_scan; return 0;;
-        -u|--userbin) printf "\n"; _ca_list_user_bin; return 0;;
-        -V|--verify) printf "\n"; shift; cmd="$1"; _ca_verify_package "$cmd"; return 0;;
-        -o|--overridden) printf "\n"; _ca_overridden; return 0;;
         -t|--trace) shift; cmd="$1"; _ca_print_trace "$cmd"; return 0;;
-        -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;
+        -u|--user) printf "\n"; _ca_list_user_bin; return 0;;
+        -V|--verify) printf "\n"; shift; cmd="$1"; _ca_verify_package "$cmd"; return 0;;
         --fzf)
             if (( fzffound == 1 )); then 
                 local pick
@@ -761,21 +761,23 @@ _ca_usage() {
      Options:
            -h --help or h       Show this help text.
            -v --version         Show version information.
-           -f --functions	list all USER functions in the enviroment
-           -fv --funverb	Verbose - list ALL functions in the enviroment
            -a --aliases 	list all aliases in the enviroment
-           -s --sourced         List all sourced files in the enviroment.
-           -o --overridden      List all commands that override another command in the enviroment.
+           -f --functions	List all USER functions in the enviroment
+           -fv --funverb	Verbose - list ALL functions in the enviroment
+           --fzf                Use fzf to interactivly search for commands  
+           -d, --diff	        list shell options that have changed from default in the enviroment
+           -o --overridden      List commands that override others
            -p --path            List all directories in $PATH and highlight writable directories.
-           -S --scan            List SUID binaries, SGID binaries and World Writable directories.
-           -t --trace           Command resolution order mapping
-           -V --verify          Verify package integrity, supports dpkg rpm and pacman.
-           --fzf                Use fzf to interactivly search for commands   
+           -s --sourced         List all sourced files in the enviroment.
+           -S --scan            Scan for SUID/SGID binaries and world-writable directories
+           -t, --trace	        Command resolution order mapping
+           -u, --user	        List USER writable commands
+           -V --verify          Verify package integrity (supports dpkg, rpm and pacman)
+            
              
      Examples:
            ca                   # Automatically analyzes your most recent command
            ca awk               # Analyzes 'awk'
-           ca ls                # Is 'ls' a builtin, keyword, alias, function, script or binary?
            ca -t awk            # Which awk runs and why that one?
            
 EOF
@@ -788,7 +790,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.81 — Bash Command Analyzer
+     ca v1.0.82 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -1925,10 +1927,22 @@ if [[ "$ctype" == "file" ]]; then
     fi
 
     printf "Package Integrity:\n"
-    printf " ├─ Package: %s\n" "${pkg:-none}"
+    printf " ├─ Command: ${CYAN}%s${RESET}\n" "$cmd"
+    if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
+        printf " ├─ Resolves to: ${CYAN}%s${RESET} - ${YELLOW}Symlink to [ %s ]${RESET}\n" "$cmd" "$(basename "$cmd_real")"
+    else
+        printf " ├─ Resolves to: ${CYAN}%s${RESET}\n" "$cmd"
+    fi
+    printf " ⎟\n"  
+    if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
+        printf " ├─ Package: ${YELLOW}%s${RESET}\n" "${pkg:-none}"
+    else
+        printf " ├─ Package: ${CYAN}%s${RESET}\n" "${pkg:-none}"
+    fi
     printf " ├─ Path: %s\n" "$cmd_real"
     printf " ├─ SHA256: %s\n" "$sha"    
     printf " └─ Status: %s\n" "$status"
+
 fi    
 }
 
