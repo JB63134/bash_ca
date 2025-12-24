@@ -60,25 +60,6 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 
 ---
 
-## Installation
-
-Clone the repository and source the script in your `.bashrc` or `.bash_profile`:
-
-```bash
-git clone https://github.com/yourusername/ca.git
-source /path/to/ca/.bash_ca
-```
-
----
-
-## Usage
-
-```bash
-ca [command]
-```
-
-If no command is provided, `ca` will analyze your **most recent command**.
-
 ### Options
 
 | Option               | Description                                                        |
@@ -97,6 +78,26 @@ If no command is provided, `ca` will analyze your **most recent command**.
 | `-t` `--trace`       | Command resolution order mapping                                   |
 | `-u`, `--user`       | List USER writable commands                                        |
 | `-V`, `--verify`     | Verify package integrity                                           |
+
+---
+## Installation
+
+Clone the repository and source the script in your `.bashrc` or `.bash_profile`:
+
+```bash
+git clone https://github.com/yourusername/ca.git
+source /path/to/ca/.bash_ca
+```
+
+---
+
+## Usage
+
+```bash
+ca [command]
+```
+
+If no command is provided, `ca` will analyze your **most recent command**.
 
 ---
 
