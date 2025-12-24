@@ -6,7 +6,11 @@
 [![Version](https://img.shields.io/badge/version-1.0.81-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
-**ca** is an advanced Bash command analysis tool that inspects commands, aliases, builtins, keywords, functions, text executables, and external binaries. Instead of relying on multiple tools (type, which, command -V, declare, alias, etc.), ca unifies all command resolution logic into a single analysis engine.
+`ca` is an interactive Bash command analyzer that explains **what a command really is**, **where it comes from**, and **why Bash resolves it the way it does**.
+
+It inspects aliases, functions, builtins, keywords, scripts, and binaries, then traces how commands expand and resolve in your shell. The goal is to make Bash behavior transparent, especially in heavily customized environments.
+
+Think of it as `type`, `which`, `help`, `file`, `ldd`, `stat`, and half your shell configuration, available through a single command.
 
 Requires: Bash ≥ V4.4 and GNU utils  
 Package Lookup: supports dpkg, rpm, and pacman   
@@ -16,78 +20,81 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 
 ## Features
 
-* **Syntax-highlighting** of scripts and functions
-* Inspect **aliases and functions**:
+### Command Resolution
+- Detects whether a command is an **alias, function, builtin, keyword, or external binary**
+- Recursively analyzes alias expansions and command chains
+- Traces command resolution order and `$PATH` precedence
+- Automatically analyzes your **most recent command** if none is specified
+- Prevents infinite recursion and cyclic alias/function loops
 
-  * show alias definition or function body
-  * location (file and line number, or interactive shell)
-* Inspect **builtins**:
+### Alias, Function, and Builtin Inspection
+- Displays alias expansions and where they are defined
+- Locates function definitions with file and line numbers
+- Shows syntax-highlighted previews of function bodies
+- Detects disabled builtins and what replaces them
+- Identifies commands overridden by aliases, functions, or binaries
 
-  * Detect if the builtin is enabled
-  * Detect whether it is a core builtin or loadable.
-* Inspect **external binaries**:
+### External Binary Analysis
+- Resolves full paths and symbolic links
+- Displays file type, interpreter, ELF details, and linkage
+- Lists shared library dependencies and flags missing ones
+- Shows binary size in human-readable units
+- Reports permissions, ownership, and security risks (SUID, SGID, world-writable)
+- Flags commands that likely require root privileges
+- Displays file timestamps (create, modify, access, change)
 
-  * Displays the full resolved path and alerts you of symlinks
-  * Detects shadowed binaries
-  * File type (script, ELF, etc.)
-  * Interpreter for scripts
-  * list Dependencies and detect missing dependencies
-  * File size
-  * Permissions and ownership
-  * SUID/SGID bits
-  * Timestamps
-  * Root privilege requirement
- 
-* Display **Package info**:
+### Shell Environment Visibility
+- Lists all sourced shell files, including conditional and loop-based sourcing
+- Scans `$PATH` and highlights writable directories
+- Identifies user-writable commands
+- Shows shell options that differ from defaults
+- Maps command shadowing and override conflicts
 
-  * package name
-  * version
-  * maintainer info
-  * package description
-* Detect **overrides**:
+### Security & Auditing Tools
+- Scans for SUID and SGID binaries
+- Finds world-writable directories
+- Verifies package integrity (dpkg, rpm, pacman)
+- Highlights potentially dangerous overrides and path issues
 
-  * Aliases overriding builtins or files
-  * Functions overriding aliases, builtins, or binaries
-  * Disabled builtins and their replacements
-* Scan your system for:
+### Usability
+- Designed for interactive Bash shells
+- Colorized, structured output with safe fallbacks
+- Optional `fzf` integration for interactive command selection
+- Tab completion for aliases, functions, builtins, and executables
+- Modular dependency checking (required vs optional tools)
 
-  * **SUID / SGID binaries**
-  * **World-writable directories**
-  * Writable directories in `$PATH`
-  * Recursivly detect **Sourced files** in the enviroment
-* Interactive search using `fzf` for commands (optional)
-* Pretty-printed, colorized output (uses `tput` or ANSI colors)
+---
+
+## Options
+
+| Option               | Description                                                |
+| -------------------- | ---------------------------------------------------------- |
+| `-h`, `--help`       | Show help text                                             |
+| `-v`, `--version`    | Show version information                                   |
+| `-a`, `--aliases`    | List all aliases                                           |
+| `-f`, `--functions`  | List user-defined functions                                |
+| `-fv`, `--funverb`   | List all functions (verbose)                               |
+| `--fzf`              | Interactive command selection via fzf                      |
+| `-d`, `--diff`       | Show shell options changed from defaults                   |
+| `-o`, `--overridden` | List overridden commands                                   |
+| `-p`, `--path`       | Inspect `$PATH` and highlight writable directories         |
+| `-s`, `--sourced`    | List sourced shell files                                   |
+| `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories |
+| `-t`, `--trace`      | Show command resolution order                              |
+| `-u`, `--user`       | List user-writable commands                                |
+| `-V`, `--verify`     | Verify package integrity (dpkg, rpm, pacman)               |
 
 ---
 
-### Options
-
-| Option               | Description                                                        |
-| -------------------- | ------------------------------------------------------------------ |
-| `-h`, `--help`       | Show help text                                                     |
-| `-v`, `--version`    | Show version information                                           |
-| `-a`, `--aliases`    | list all aliases in the enviroment                                 |
-| `-f`, `--functions`  | list all USER functions in the enviroment                          |
-| `-fv`,`--funverb`    | Verbose - list ALL functions in the enviroment                     | 
-| `--fzf`              | Interactively search for commands (requires `fzf`)                 |
-| `-d`, `--diff`       |list shell options that have changed from default in the enviroment |
-| `-o`, `--overridden` | List commands that override others                                 |
-| `-p`, `--path`       | List all directories in `$PATH` and highlight writable directories |
-| `-s`, `--sourced`    | List all sourced files in your environment                         |
-| `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories         |
-| `-t` `--trace`       | Command resolution order mapping                                   |
-| `-u`, `--user`       | List USER writable commands                                        |
-| `-V`, `--verify`     | Verify package integrity                                           |
-
----
 ## Installation
 
-Clone the repository and source the script in your `.bashrc` or `.bash_profile`:
+Source the script in your interactive shell:
 
 ```bash
-git clone https://github.com/yourusername/ca.git
-source /path/to/ca/.bash_ca
-```
+source .bash_ca
+````
+
+Restart your shell or reload your configuration.
 
 ---
 
@@ -97,8 +104,17 @@ source /path/to/ca/.bash_ca
 ca [command]
 ```
 
-If no command is provided, `ca` will analyze your **most recent command**.
+If no command is provided, `ca` analyzes the **last executed command**.
 
+### Examples
+
+```bash
+ca
+ca ls
+ca awk
+ca -o
+ca -t awk
+```
 ---
 
 ## Screenshots / Output Preview
