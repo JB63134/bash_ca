@@ -1,3 +1,12 @@
+V1.0.85
+     ui/ux cleanup
+
+     if a directory in path doesn't exist -
+     -p will now mark the directory as missing 
+     rather than ignore it.
+
+     stopped redundant notifications in overrides too. 
+
 V1.0.82
      ui/ux stuff
      fixed some wording blah blah blah...
