@@ -150,7 +150,14 @@ ca() {
         -v|--version) _ca_ver; return 0;;
         -a|--aliases) printf "\n"; _ca_aliases; return 0;;  
         -f|--functions) printf "\n"; _ca_function; return 0;;
-        -fv|--funverb) verbose=1; printf "\n"; _ca_function; return 0;;           
+        -fv|--funverb) verbose=1; printf "\n"; _ca_function; return 0;;    
+        -F|--forensic)
+            printf "\n"
+            shift
+            _ca_print_trace "$1" &&
+            _ca_verify_package "$1"    
+            return 0
+            ;;              
         -d|--diff) printf "\n"; _ca_bash_option_diff; return 0;;   
         -o|--overridden) printf "\n"; _ca_overridden; return 0;;   
         -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;   
@@ -765,15 +772,14 @@ _ca_usage() {
            -f --functions	List all USER functions in the enviroment
            -fv --funverb	Verbose - list ALL functions in the enviroment
            --fzf                Use fzf to interactivly search for commands  
-           -d, --diff	        list shell options that have changed from default in the enviroment
+           -d --diff	        list shell options that have changed from default in the enviroment
            -o --overridden      List commands that override others
            -p --path            List all directories in $PATH and highlight writable directories.
            -s --sourced         List all sourced files in the enviroment.
            -S --scan            Scan for SUID/SGID binaries and world-writable directories
-           -t, --trace	        Command resolution order mapping
-           -u, --user	        List USER writable commands
+           -t --trace	        Command resolution order mapping
+           -u --user	        List USER writable commands
            -V --verify          Verify package integrity (supports dpkg, rpm and pacman)
-            
              
      Examples:
            ca                   # Automatically analyzes your most recent command
@@ -790,7 +796,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.82 — Bash Command Analyzer
+     ca v1.0.85 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -1248,7 +1254,7 @@ _ca_alias_override() {
     local acmd list akind
     local flag=0
     
-    printf "%s├─ Examining aliases to detect overridden commands:\n" "$CA_INDENT"
+    printf "├─ Examining aliases to detect overridden commands:\n"
 
     while IFS= read -r acmd; do
         mapfile -t list < <(type -at "$acmd")
@@ -1265,17 +1271,17 @@ _ca_alias_override() {
         for akind in "${uniq[@]}"; do
             case "$akind" in
                 builtin)
-                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$CA_INDENT" "$acmd"
+                    printf "    ↳ Alias   -  ${YELLOW}%-10s${RESET} overrides a builtin of the same name.\n" "$acmd"
                     flag=1 ;;
                 file)
-                    printf "%s    ↳ Alias ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$CA_INDENT" "$acmd"
+                    printf "    ↳ Alias  -  ${YELLOW}%-10s${RESET} overrides one or more external commands of the same name.\n" "$acmd"
                     flag=1 ;;
             esac
         done
     done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
 
     if (( flag == 0 )); then
-        printf "%s    ↳ ${CYAN}No command or builtin is overridden.${RESET}\n" "$CA_INDENT"
+        printf "    ↳ %sNo command or builtin is overridden.%s\n" "$CYAN" "$RESET"
     fi
 }
 
@@ -1286,29 +1292,44 @@ _ca_alias_override() {
 _ca_function_override() { 
     local funcmd kind kinds 
     local func_flag=0
+    declare -A seen_funcs=()          # deduplicate function names
+    declare -A seen_funcs_kinds=()    # deduplicate function/kind combinations
 
-    printf "%s├─ Examining functions to detect overridden commands:\n" "$CA_INDENT"
+    printf "├─ Examining functions to detect overridden commands:\n"
 
     # Get list of function names
     while read -r funcmd; do
+        # Skip if already processed
+        [[ ${seen_funcs[$funcmd]} ]] && continue
+        seen_funcs[$funcmd]=1
+
+        # Skip names with characters that may break 'type'
+        if [[ ! "$funcmd" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            continue
+        fi
+
         mapfile -t kinds < <(type -at "$funcmd")
 
         for kind in "${kinds[@]}"; do
+            key="$funcmd-$kind"
+            [[ ${seen_funcs_kinds[$key]} ]] && continue
+            seen_funcs_kinds[$key]=1
+
             case "$kind" in
                 alias)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides an alias of the same name.\n" "$CA_INDENT" "$funcmd"
+                    printf "    \u21b3 Function - ${YELLOW}%-10s${RESET} overrides an alias of the same name.\n" "$funcmd"
                     func_flag=1
                     ;;
                 keyword)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} conflicts with a shell keyword of the same name (keyword takes precedence).\n" "$CA_INDENT" "$funcmd"
+                    printf "    \u21b3 Function - ${YELLOW}%-10s${RESET} conflicts with a keyword of the same name (keyword takes precedence).\n" "$funcmd"
                     func_flag=1
                     ;;
                 builtin)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides a builtin of the same name.\n" "$CA_INDENT" "$funcmd"
+                    printf "    \u21b3 Function - ${YELLOW}%-10s${RESET} overrides a builtin of the same name.\n" "$funcmd"
                     func_flag=1
                     ;;
                 file)
-                    printf "%s    ↳ Function ${YELLOW}%s${RESET} overrides at least one external command of the same name.\n" "$CA_INDENT" "$funcmd"
+                    printf "    \u21b3 Function - ${YELLOW}%-10s${RESET} overrides one or more external commands of the same name.\n" "$funcmd"
                     func_flag=1
                     ;;
             esac
@@ -1316,16 +1337,17 @@ _ca_function_override() {
     done < <(declare -F | awk '{print $3}')
 
     if [[ $func_flag -eq 0 ]]; then
-        printf "%s    ↳ No command or builtin is overridden.\n" "$CA_INDENT"
+        printf "    \u21b3 No command or builtin is overridden.\n"
     fi
 }
+
 
 #------------------------------------------------------------------------
 # Function: _ca_builtin_override
 # Purpose : list builtins that are disabled and note if external commands replace them
 #------------------------------------------------------------------------
 _ca_builtin_override() {
-    printf "%s├─ Examining disabled builtins to identify any replacement commands:\n" "$CA_INDENT"
+    printf "├─ Examining disabled builtins to identify any replacement commands:\n"
 
     local b disabled=()
 
@@ -1335,24 +1357,24 @@ _ca_builtin_override() {
     done < <(enable -a | grep '^enable -n ')
 
     if (( ${#disabled[@]} == 0 )); then
-        printf "%s    ↳ No builtins are disabled.\n" "$CA_INDENT"
+        printf "    ↳ No builtins are disabled.\n"
         return
     fi
 
     local name
     for name in "${disabled[@]}"; do
-        printf "%s    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$CA_INDENT" "$name"
+        printf "    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$name"
 
         # 1. Alias replacement?
         if alias "$name" &>/dev/null; then
             adef=$(alias "$name")
-            printf "%s       • Alias ${YELLOW}'%s' -- '%s'${RESET} now replaces the builtin.\n" "$CA_INDENT" "$name" "$adef"
+            printf "       • Alias ${YELLOW}'%s' -- '%s'${RESET} now replaces the builtin.\n" "$name" "$adef"
             continue
         fi
 
         # 2. Function replacement?
         if declare -F "$name" &>/dev/null; then
-            printf "%s       • Function ${YELLOW}'%s'${RESET} now replaces the builtin.\n" "$CA_INDENT" "$name"
+            printf "       • Function ${YELLOW}'%s'${RESET} now replaces the builtin.\n" "$name"
             continue
         fi
 
@@ -1360,9 +1382,9 @@ _ca_builtin_override() {
         if command -v "$name" &>/dev/null; then
             local newpath
             newpath=$(command -v "$name")
-            printf "%s       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$CA_INDENT" "$name" "$newpath"
+            printf "       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$name" "$newpath"
         else
-            printf "%s       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$CA_INDENT" "$name"
+            printf "       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$name"
         fi
     done
 }
@@ -1444,29 +1466,33 @@ _ca_restore_path
     printf "========== PATH Inspection (Mode: -p) ==========\n\n"                          
     printf "├─ Examining PATH directory Order and Permissions:\n"
     printf "    ↳ %s%-40s %-15s %-20s %-10s%s\n" "$UNLINE" "Directory" "Perms" "Owner:Group" "Note" "$STOPUNLINE"
-
-#    printf "    ↳ ${UNLINE}%-40s %-15s %-20s %-10s${STOPUNLINE}\n" "Directory" "Perms" "Owner:Group" "Note"
     
     IFS=: read -ra dirs <<< "$PATH"
     for dir in "${dirs[@]}"; do
-        [ -d "$dir" ] || continue
+    if [ ! -d "$dir" ]; then
+        # Directory does not exist
+        perms="N/A"
+        owner_g="N/A"
+        note="${BPURP}MISSING${RESET}"
+        printf "    ↳ ${BPURP}%-40s %-15s %-20s ${RESET}%-10s\n" "$dir" "$perms" "$owner_g" "$note"
+        continue
+    fi
 
-    # Resolve symlink to actual directory
-    target=$(readlink -f "$dir")
-    perms=$(stat -c "%A" "$target")
-    owner_g=$(stat -c "%U:%G" "$target")
+    # Directory exists
+    target=$(readlink -f "$dir" 2>/dev/null || echo "$dir")
+    perms=$(stat -c "%A" "$target" 2>/dev/null || echo "N/A")
+    owner_g=$(stat -c "%U:%G" "$target" 2>/dev/null || echo "N/A")
     note=""
 
-        # Check if world-writable (other write bit set)
-        if [[ "${perms:8:1}" == "w" ]]; then
-            note="${BPURP}WORLD-WRITABLE${RESET}"
-            printf "    ↳ ${RED}%-40s %-15s %-20s ${RESET}%-10s\n" "$dir" "$perms" "$owner_g" "$note"
-        elif [ -w "$dir" ]; then
-            note="Writable"
-            printf "    ↳ ${YELLOW}%-40s %-15s %-20s %-10s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
-        else
-            printf "    ↳ %-40s %-15s %-20s %-10s\n" "$dir" "$perms" "$owner_g" "$note"
-        fi
+    if [[ "${perms:8:1}" == "w" ]]; then
+        note="${RED}WORLD-WRITABLE${RESET}"
+        printf "    ↳ ${RED}%-40s %-15s %-20s ${RESET}%-10s\n" "$dir" "$perms" "$owner_g" "$note"
+    elif [ -w "$dir" ]; then
+        note="Writable"
+        printf "    ↳ ${YELLOW}%-40s %-15s %-20s %-10s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+    else
+        printf "    ↳ %-40s %-15s %-20s %-10s\n" "$dir" "$perms" "$owner_g" "$note"
+    fi
     done
     printf "\n================ End of list =================== \n"
 }
@@ -1886,8 +1912,8 @@ _ca_verify_package() {
     
     ctype=$(type -t -- "$cmd" 2>/dev/null)
     if [[ -z "$ctype" ]]; then
-        printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$CA_INDENT" "$cmd"
-        printf "%s    ↳ Check your spelling and try again\n\n" "$CA_INDENT" 
+        printf "├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$cmd"
+        printf "    ↳ Check your spelling and try again\n\n" 
         return 1
     fi
 
@@ -1926,22 +1952,22 @@ if [[ "$ctype" == "file" ]]; then
         status="${YELLOW}User Installed${RESET}"
     fi
 
-    printf "Package Integrity:\n"
-    printf " ├─ Command: ${CYAN}%s${RESET}\n" "$cmd"
+    printf "├─ Examining Package Integrity:\n"
+    printf "    ├─ Command: ${CYAN}%s${RESET}\n" "$cmd"
     if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
-        printf " ├─ Resolves to: ${CYAN}%s${RESET} - ${YELLOW}Symlink to [ %s ]${RESET}\n" "$cmd" "$(basename "$cmd_real")"
+        printf "    ├─ Resolves to: ${CYAN}%s${RESET} - ${YELLOW}Symlink to [ %s ]${RESET}\n" "$cmd" "$(basename "$cmd_real")"
     else
-        printf " ├─ Resolves to: ${CYAN}%s${RESET}\n" "$cmd"
+        printf "    ├─ Resolves to: ${CYAN}%s${RESET}\n" "$cmd"
     fi
-    printf " ⎟\n"  
+    printf "    ⎟\n"  
     if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
-        printf " ├─ Package: ${YELLOW}%s${RESET}\n" "${pkg:-none}"
+        printf "    ├─ Package: ${YELLOW}%s${RESET}\n" "${pkg:-none}"
     else
-        printf " ├─ Package: ${CYAN}%s${RESET}\n" "${pkg:-none}"
+        printf "    ├─ Package: ${CYAN}%s${RESET}\n" "${pkg:-none}"
     fi
-    printf " ├─ Path: %s\n" "$cmd_real"
-    printf " ├─ SHA256: %s\n" "$sha"    
-    printf " └─ Status: %s\n" "$status"
+    printf "    ├─ Path: %s\n" "$cmd_real"
+    printf "    ├─ SHA256: %s\n" "$sha"    
+    printf "    └─ Status: %s\n" "$status"
 
 fi    
 }
@@ -2117,9 +2143,10 @@ _ca_print_trace() {
     local alias_def="" file line quote result
 
     _ca_resolve_command "$cmd" res
-
-    printf "\n      %s -- command resolution order:\n\n" "$cmd"
-
+    
+    printf "\n    ├─ ${CYAN}%s${RESET} -- command resolution order:\n" "$cmd"
+    printf "    ⎟\n" 
+    
     # 1. Alias
     printf "    ├─ Alias?\n"
     if [[ ${res[0]} == alias\|found* ]]; then
