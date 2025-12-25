@@ -74,6 +74,7 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 | `-a`, `--aliases`    | List all aliases                                           |
 | `-f`, `--functions`  | List user-defined functions                                |
 | `-fv`, `--funverb`   | List all functions (verbose)                               |
+| `-F`, `--forensic`   | `-t` and `-V `  forensic report                            |
 | `--fzf`              | Interactive command selection via fzf                      |
 | `-d`, `--diff`       | Show shell options changed from defaults                   |
 | `-o`, `--overridden` | List overridden commands                                   |
