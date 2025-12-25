@@ -120,13 +120,13 @@ ca -t awk
 
 ## Screenshots / Output Preview
 
+![Binary](images/awk.png)
 ![Traec](images/trace.png)
 ![package](images/package.png)
 ![af](images/af.png)
 ![Source and $Path modes](images/source-path.png)
 ![Overridden commands](images/override.png)
 ![Builtins and Keywords](images/builtin-keyword.png)
-![Binary](images/awk.png)
 ![Aliases](images/alias.png)
 ![Script](images/script.png)
 ![World-Writable file](images/world-writable.png)
