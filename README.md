@@ -1,5 +1,6 @@
 
 # ca – Bash Command Autopsy
+
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -45,6 +46,8 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 
 ### Shell Environment Visibility
 - Lists all sourced shell files, including conditional and loop-based sourcing
+- Lists all environment variables
+- Lists all variables loaded by sourced files
 - Scans `$PATH` and highlights writable directories
 - Identifies user-writable commands
 - Shows shell options that differ from defaults
