@@ -94,19 +94,40 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 
 ## Installation
 
-### Download and Source bash_ca in your .bashrc file:
+---
+
+### 1. Manual Installation
+
+Clone the repository.
+```bash
+# Clone the repository.
+git clone https://github.com/JB63134/bash_ca.git /usr/local/bin/bash_ca
+
+# Source the main script in your .bashrc or .bash_profile
+echo "source /usr/local/bin/bash_ca/.bash_ca" >> ~/.bashrc
+
+# Apply changes immediately
+source ~/.bashrc
+```
+
+---
+
+### 2. Debian/Ubuntu `.deb` Package
+
+A quick method for Debian-based systems:
 
 ```bash
-source .bash_ca
-````
-
-### .deb package
-
-```bash
+# Download the latest release
 wget https://github.com/JB63134/bash_ca/releases/latest/download/ca_1.1.0.deb
-sudo dpkg -i ca_1.1.0.deb
-````
 
+# Install using dpkg
+sudo dpkg -i ca_1.1.0.deb
+
+# Verify installation
+ca -h
+```
+
+---
 
 ---
 
