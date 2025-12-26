@@ -1,124 +1,112 @@
-V1.1.0
-     ui/ux cleanup - always
-     
-     sourced file detection display now 
-     represents the order files are sourced
-     
-     new modes for variables
-     -l --listenv
-        list all system variables (printenv / env)
-        
-        -var
-        list all variables loaded by sourced files
+# `bash_ca` Changelog
 
-V1.0.85
-     ui/ux cleanup
+## V1.1.0
+- UI/UX cleanup
+- Sourced file detection now shows the order files are sourced
+- New variable modes:
+  - `-l` / `--listenv` – list all system variables (`printenv` / `env`)
+  - `-var` – list all variables loaded by sourced files
 
-     if a directory in path doesn't exist -
-     -p will now mark the directory as missing 
-     rather than ignore it.
+## V1.0.85
+- UI/UX improvements
+- `-p` now marks missing PATH directories instead of ignoring them
+- Redundant notifications in overrides stopped
 
-     stopped redundant notifications in overrides too. 
+## V1.0.82
+- UI/UX improvements
+- Wording and display fixes
 
-V1.0.82
-     ui/ux stuff
-     fixed some wording blah blah blah...
+## V1.0.81
+- Added `-d` / `--diff` for shell options to show deviations from defaults
 
-V1.0.81
-     added -d --diff for shell options to show deviation from default
+## V1.0.80
+- UI/UX improvements
+- Trace mode bugs fixed (shadowed functions reliably found)
+- Depth count for recursion control fixed
 
-V1.0.80
-     UI/UX stuff.
-     fixed bug in trace mode, shadowed functions are now reliably found
-     fixed bug in depth count for recursion control
+## V1.0.77
+- UI/UX improvements
+- Trace mode fixes for shadowed builtins
 
-V1.0.77
-     UI/UX stuff.
-     fixed bug in trace mode, shadowed builtins are now reliably found
+## V1.0.75
+- New **Command Resolution Trace**
+  - Shows Bash command resolution order
+  - Highlights shadowing (e.g., alias overriding a builtin)
+- PATH code refinement
 
-V1.0.75
-     new Command Resolution Trace
-     shows the order Bash would resolve a command
-     Highlights shadowing (e.g., alias overriding a builtin)
-     UI needs a lot of cleanup, but it works and im tired.
+## V1.0.72
+- Removed heuristic threat assessment (`--t`) – now sticks to defensible facts
+- Alias flag `-a` enumerates all aliases
+- Function flag `-f` enumerates user functions
+- Verbose function flag `-fv` enumerates all functions in the environment
 
-     try ca --trace awk
-     PATH code further refined
+## V1.0.71
+- Added clickable file hyperlinks for aliases, functions, and scripts (terminals supporting hyperlinks: iTerm2, Kitty, GNOME Terminal)
 
-V1.0.72
-     removed heuristic threat assesment option -- too subjective for my liking 
-     ca needs to stick to defensible facts.
-     alias flag -a now enumerate all aliases
-     function flag -f now enumerate all user-functions
-     verbose function flag -fv now enumerate ALL functions in the enviroment
+## V1.0.70
+- New heuristic threat assessment option `-t`
+  - Scans SUID, SGID, and world-writable directories
 
-V1.0.71
-     added support for file hyperlinks for aliases functions and scripts.
-     Terminals that support hyperlinks (iTerm2, Kitty, GNOME Terminal) will make it clickable.  on my system they open with gedit
-     Other terminals will just display the path normally.
+## V1.0.51
+- New function to generate hashes of aliases, functions, binaries, and scripts
 
-V1.0.70
-      new heuristic threat assesment option  flag -t
-      scans suid sgid and world writable directories 
-      
-V1.0.51
-     new function to generate hashes of aliases functions binaries and scripts
+## V1.0.50
+- Improved handling of Bash operators, pipeline symbols, redirections during recursion
 
-V1.0.50
-     handle more bash operators, pipeline symbols, redirections, etc. during recursion
-    
-V1.0.48  
-     Fixed problem with alias expansion
-     code cleanup. -- passed shellcheck
+## V1.0.48
+- Fixed alias expansion problems
+- Code cleanup (ShellCheck passed)
 
-V1.0.45
-     did some work on recursive alias expansion - some command operators are now supported
-     ui fixes...
+## V1.0.45
+- Recursive alias expansion improvements (some command operators supported)
+- UI fixes
 
-V1.0.39
-     Fixed problem with variable expansion - Passed Shellcheck
+## V1.0.39
+- Fixed variable expansion issues (ShellCheck passed)
 
-V1.0.38
-     Major overhaul of sourced file detection to handle more nested sourced files, conditional sourcing, etc.
-     also follows bash internal logic for startup files now.
-     detects rhel fedora and adds profile.d/*sh for interactive non login shells
+## V1.0.38
+- Major overhaul of sourced file detection:
+  - Handles nested sourced files, conditional sourcing
+  - Follows Bash internal logic for startup files
+  - Detects RHEL/Fedora and adds `profile.d/*sh` for interactive non-login shells
 
-V1.0.32
-     support for rpm and packman fixed, nix dropped for now.
+## V1.0.32
+- RPM and Pacman support fixed
+- Nix support dropped temporarily
 
-V1.0.30
-     added experimental support for rpm, pacman and nix file managers
+## V1.0.30
+- Experimental support for RPM, Pacman, and Nix package managers
 
-V1.0.28
-     fixed a problem with the dependency check
+## V1.0.28
+- Fixed dependency check issues
 
-V1.0.27
-     limited preview of scripts and functions to 50 lines.
-     
-V1.0.25
-     code cleanup. -- passed shellcheck
+## V1.0.27
+- Limited preview of scripts/functions to 50 lines
 
-V1.0.19
-     added support for batcat highlighting with fallback to perl
-     fixed $PATH code for (mode : -p)
-     code cleanup. ui bug fixes.
+## V1.0.25
+- Code cleanup (ShellCheck passed)
 
-V1.0.15
-     code cleanup. ui bug fixes.
-     added support to display $PATH shadowing for external binaries
+## V1.0.19
+- Added `batcat` highlighting with fallback to Perl
+- Fixed `$PATH` code for `-p` mode
+- UI bug fixes
 
-V1.0.12 
-     code cleanup. ui bug fixes.
-     PATH manipulation code consolidated, broken out to a function
-     PATH restoration handled by new function and a trap on return
+## V1.0.15
+- Code cleanup and UI bug fixes
+- Display `$PATH` shadowing for external binaries
 
-V1.0.7
-     Enhanced <TAB> completion, and PATH detection.
-     Code cleanup.
+## V1.0.12
+- Code cleanup and UI bug fixes
+- Consolidated PATH manipulation code
+- PATH restoration handled with a trap on return
 
-V1.0.5 
-     Switched to using perl for highlighting instead of sed.  
-     Fixed some exe detection code.
+## V1.0.7
+- Enhanced `<TAB>` completion and PATH detection
+- Code cleanup
 
-V1.0.0
-     Split from h first independent version
+## V1.0.5
+- Switched to Perl for highlighting instead of sed
+- Fixed executable detection code
+
+## V1.0.0
+- First independent version (split from `bash_h`)
