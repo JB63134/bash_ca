@@ -3,7 +3,7 @@
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.85-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-1.1.0-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
 `ca` is an interactive Bash command analyzer that explains **what a command really is**, **where it comes from**, and **why Bash resolves it the way it does**.
