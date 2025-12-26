@@ -159,6 +159,11 @@ ca() {
             return 0
             ;;              
         -d|--diff) printf "\n"; _ca_bash_option_diff; return 0;;   
+        -l|--listenv)
+            shift
+            _ca_list_env "$*"
+            return 0
+            ;;
         -o|--overridden) printf "\n"; _ca_overridden; return 0;;   
         -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;   
         -s|--sourced) printf "\n"; _ca_sourced_files; return 0;;
@@ -166,6 +171,14 @@ ca() {
         -t|--trace) shift; cmd="$1"; _ca_print_trace "$cmd"; return 0;;
         -u|--user) printf "\n"; _ca_list_user_bin; return 0;;
         -V|--verify) printf "\n"; shift; cmd="$1"; _ca_verify_package "$cmd"; return 0;;
+        -var)
+            printf "\n"
+            _ca_sourced_files &&
+            printf "\n"
+            _ca_apply_startup_with_env_tracking
+            printf "\n"
+            return 0
+           ;;
         --fzf)
             if (( fzffound == 1 )); then 
                 local pick
@@ -796,7 +809,7 @@ EOF
 _ca_ver() {
     cat <<'EOF'
 
-     ca v1.0.85 — Bash Command Analyzer
+     ca v1.1.0 — Bash Command Analyzer
      Author : John Blair
           
      MIT License
@@ -1773,16 +1786,80 @@ _ca_sourced_files() {
     printf "├─ Searching for files that have been sourced into the enviroment automatically\n" 
     printf "    ↳ %sDiscovered the following files%s:\n" "$UNLINE" "$STOPUNLINE"
 
-    for file in "${__CA_SOURCED_FILES_LIST[@]}"; do
+
+    local phase
+    local -a roots ordered
+    local f
+
+    # Reset global state (important)
+    __CA_SOURCED_FILES_MAP=()
+    __CA_SOURCED_FILES_LIST=()
+    __CA_SOURCED_SCANNED=0
+
+    #-------------------------------------------------------
+    # Phase 1: Non-interactive
+    if [[ -n "$BASH_ENV" && -f "$BASH_ENV" ]]; then
+        roots+=( "$BASH_ENV" )
+        phase="non-interactive"
+    fi
+
+    #-------------------------------------------------------
+    # Phase 2: Login shell
+    if shopt -q login_shell; then
+        phase="login"
+
+        [[ -f /etc/profile ]] && roots+=( /etc/profile )
+        [[ -d /etc/profile.d ]] && roots+=( /etc/profile.d/*.sh )
+
+        if [[ -f ~/.bash_profile ]]; then
+            roots+=( ~/.bash_profile )
+        elif [[ -f ~/.bash_login ]]; then
+            roots+=( ~/.bash_login )
+        elif [[ -f ~/.profile ]]; then
+            roots+=( ~/.profile )
+        fi
+
+    #-------------------------------------------------------
+    # Phase 3: Interactive non-login
+    elif [[ $- == *i* ]]; then
+        phase="interactive non-login"
+
+        [[ -f /etc/bash.bashrc ]] && roots+=( /etc/bash.bashrc )
+        [[ -f /etc/bashrc ]] && roots+=( /etc/bashrc )
+        [[ -f ~/.bashrc ]] && roots+=( ~/.bashrc )
+    fi
+
+    #-------------------------------------------------------
+    # Static discovery pass
+    for f in "${roots[@]}"; do
+        _ca_sourcedtree_single "$f" 0 "$CA_MAX_DEPTH"
+    done
+
+    #-------------------------------------------------------
+    # Emit ordered walk
+    # Root files first, then discovered children
+    for f in "${roots[@]}"; do
+        f=$(_ca_expand_path "$f")
+        [[ -f "$f" ]] && ordered+=( "$f" )
+    done
+
+    for f in "${__CA_SOURCED_FILES_LIST[@]}"; do
+        [[ " ${ordered[*]} " != *" $f "* ]] && ordered+=( "$f" )
+    done
+
+    #-------------------------------------------------------
+    # Output
+    local i=0
+    for f in "${ordered[@]}"; do
       #  printf "    ↳ ${CYAN}%s${RESET}\n" "$file" 
         # Build clickable line
         local clickable_text
-        clickable_text=$(printf "${CYAN}%s${RESET}" "$file")
+        clickable_text=$(printf "${CYAN}%s${RESET}" "$f")
         # Print clickable link
-        printf "    ↳ \e]8;;file://%s\a%s\e]8;;\a\n" "$file" "$clickable_text"
+        printf "    ↳ \e]8;;file://%s\a%s\e]8;;\a\n" "$f" "$clickable_text"
     done
     printf "\n================ End of list =================== \n"
-}        
+}
 
 #------------------------------------------------------------------------
 # Function: _ca_show_path_alternates
@@ -2010,6 +2087,9 @@ _ca_list_user_bin() {
     CA_INDENT=$(printf "%*s" $((1 * 4)) "")
     printf "=== User writable scripts/binaries (Mode: -u) ===\n\n"
     _ca_restore_path
+
+    local found=0  # flag to track if anything is printed
+
     for dir in ${PATH//:/ }; do
         [ -d "$dir" ] || continue
         [[ "$dir" =~ ^/usr|^/bin ]] && continue
@@ -2017,14 +2097,18 @@ _ca_list_user_bin() {
             [ -x "$f" ] || continue
             local fn
             fn=$(basename "$f")
-            # Build clickable line with function name, file, line
             local clickable_text
             clickable_text=$(printf "${CYAN}(%s)${RESET}" "$f")
-            # Print clickable link
             printf "%s %-25s  -- Defined in: \e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$fn" "$f" "$clickable_text"
+            found=1
         done
     done
-        printf "\n================ End of list =================== \n"
+
+    if [ $found -eq 0 ]; then
+        printf "%s%s\n\n" "$CA_INDENT" "No user-writable scripts or binaries found."
+    fi
+
+    printf "\n================ End of list =================== \n"
 }
 
 # ----------------------------------------------------------------------
@@ -2338,17 +2422,17 @@ ca "$cmd" $((depth + 1))
 # Helper function: _ca_resolve_command
 _ca_resolve_command() {
     local cmd="$1"
-    local -n out_ref="$2"
-    out_ref=()
+    local -n out_refca="$2"
+    out_refca=()
 
     local type_kind
     type_kind=$(type -t "$cmd" 2>/dev/null)
 
     # Alias
     if [[ "$type_kind" == "alias" ]]; then
-        out_ref+=("alias|found|$(alias "$cmd")")
+        out_refca+=("alias|found|$(alias "$cmd")")
     else
-        out_ref+=("alias|notfound")
+        out_refca+=("alias|notfound")
     fi
 
     # Function
@@ -2358,23 +2442,23 @@ if declare -F "$cmd" &>/dev/null; then
     read -r _ line file <<< "$(declare -F "$cmd")"
     (( was_extdebug )) && shopt -u extdebug
     [[ -z $file ]] && file="interactive shell"
-    out_ref+=("function|found|$file|$line")
+    out_refca+=("function|found|$file|$line")
 else
-    out_ref+=("function|notfound")
+    out_refca+=("function|notfound")
 fi
 
     # Builtin
 if compgen -b | grep -qx "$cmd"; then
-    out_ref+=("builtin|found")
+    out_refca+=("builtin|found")
 else
-    out_ref+=("builtin|notfound")
+    out_refca+=("builtin|notfound")
 fi
 
 # Keyword
 if compgen -k | grep -qx "$cmd"; then
-    out_ref+=("keyword|found")
+    out_refca+=("keyword|found")
 else
-    out_ref+=("keyword|notfound")
+    out_refca+=("keyword|notfound")
 fi
 
     # PATH
@@ -2383,12 +2467,12 @@ fi
         local p="$d/$cmd"
         if [[ -x "$p" ]]; then
             if [[ -L "$p" ]]; then
-                out_ref+=("path|$d|symlink|$(readlink -f "$p")")
+                out_refca+=("path|$d|symlink|$(readlink -f "$p")")
             else
-                out_ref+=("path|$d|file")
+                out_refca+=("path|$d|file")
             fi
         else
-            out_ref+=("path|$d|notfound")
+            out_refca+=("path|$d|notfound")
         fi
     done
 }
@@ -2398,53 +2482,289 @@ fi
 # Purpose: shell option diff from default state
 #------------------------------------------------------------------------
 _ca_bash_option_diff() {
-  local tmp_default tmp_current
+    local tmp_default tmp_current
+    local CA_INDENT
+    CA_INDENT=$(printf "%*s" $((1 * 4)) "")
 
-  tmp_default=$(mktemp)
-  tmp_current=$(mktemp)
-  
-#---------------------
-# Helper function:_ca_normalize
-_ca_normalize() {
-    awk '
-      # set -o output: name <tab> on|off
-      NF == 2 {
-        printf "set:%s=%s\n", $1, $2
-        next
-      }
+    printf "===Changed shell options (default vs current)===\n\n"
 
-      # shopt -p output: shopt -s|-u name
-      $1 == "shopt" {
-        state = ($2 == "-s") ? "on" : "off"
-        printf "shopt:%s=%s\n", $3, state
-      }
-    '
-  }
+    tmp_default=$(mktemp)
+    tmp_current=$(mktemp)
 
-  bash --noprofile --norc -c '
-    set -o
-    shopt -p
-  ' | _ca_normalize | sort > "$tmp_default"
-
-  {
-    set -o
-    shopt -p
-  } | _ca_normalize | sort > "$tmp_current"
-
-  printf "===Changed shell options (default vs current)===\n\n"
- 
-  join -t= -a2 -e missing -o 0,1.2,2.2 \
-    <(sort "$tmp_default") \
-    <(sort "$tmp_current") |
-  awk -F= '
-    $2 != $3 {
-      state = ($3 == "on") ? "ENABLED " : "DISABLED"
-      printf "  %-8s %s (%s → %s)\n", state, $1, $2, $3
+    # Normalize output from set -o and shopt -p
+    _ca_normalize() {
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^([a-z_-]+)[[:space:]]+(on|off)$ ]]; then
+                # set -o output
+                echo "set:${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+            elif [[ "$line" =~ ^shopt[[:space:]]+(-s|-u)[[:space:]]+([a-z_-]+)$ ]]; then
+                local state
+                [[ "${BASH_REMATCH[1]}" == "-s" ]] && state="on" || state="off"
+                echo "shopt:${BASH_REMATCH[2]}=$state"
+            fi
+        done
     }
-  '
 
-  rm -f "$tmp_default" "$tmp_current"
-  printf "\n================ End of list =================== \n"
+    # Capture default shell options
+    bash --noprofile --norc -c 'set -o; shopt -p' | _ca_normalize | sort > "$tmp_default"
+    # Capture current shell options
+    { set -o; shopt -p; } | _ca_normalize | sort > "$tmp_current"
+
+    local changed=0
+
+    # Read defaults and compare with current
+    while IFS='=' read -r key default_val; do
+        local current_val
+        current_val=$(grep -F "$key=" "$tmp_current" | cut -d= -f2)
+        # If current_val is empty, assume missing (shouldn't happen)
+        current_val=${current_val:-missing}
+
+        if [[ "$default_val" != "$current_val" ]]; then
+            changed=1
+            local state color
+            if [[ "$current_val" == "on" ]]; then
+                state="ENABLED"
+                color="$GREEN"
+            else
+                state="DISABLED"
+                color="$RED"
+            fi
+            printf "%s%s%-8s%s %s (%s → %s)\n" \
+                "$CA_INDENT" "$color" "$state" "$RESET" "$key" "$default_val" "$current_val"
+        fi
+    done < "$tmp_default"
+
+    # Empty case
+    if [ $changed -eq 0 ]; then
+        printf "%sNo shell options differ from default.\n" "$CA_INDENT"
+    fi
+
+    printf "\n================ End of list =================== \n"
+
+    rm -f "$tmp_default" "$tmp_current"
+}
+
+#-----------------------------------------------------------
+# Function: _ca_apply_startup_with_env_tracking
+# Purpose : Source startup files in order and attribute
+#           environment variable changes to each file
+#-----------------------------------------------------------
+_ca_apply_startup_with_env_tracking() {
+    local file line var val
+
+    # Provenance maps
+    declare -gA __CA_VAR_SOURCE
+    declare -gA __CA_VAR_PREV
+
+    while IFS= read -r file; do
+        [[ -z "$file" || ! -r "$file" ]] && continue
+
+        while IFS= read -r line; do
+            # Skip comments and empty lines
+            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+            # Match simple variable assignments (VAR=VALUE, export VAR=VALUE, declare VAR=VALUE)
+            if [[ "$line" =~ ^[[:space:]]*(export|declare|typeset)?[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+                var="${BASH_REMATCH[2]}"
+                val="${BASH_REMATCH[3]}"
+                val="${val%\"}"
+                val="${val#\"}"
+                val="${val%\'}"
+                val="${val#\'}"
+
+                # Track previous source
+                [[ -n "${__CA_VAR_SOURCE[$var]:-}" ]] && \
+                    __CA_VAR_PREV["$var"]+="${__CA_VAR_SOURCE[$var]} → "
+
+                __CA_VAR_SOURCE["$var"]="$file"
+                continue
+            fi
+
+            # Optionally, capture array declarations without execution
+            if [[ "$line" =~ ^[[:space:]]*(declare|typeset)[[:space:]]+-a[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+                var="${BASH_REMATCH[2]}"
+                [[ -n "${__CA_VAR_SOURCE[$var]:-}" ]] && \
+                    __CA_VAR_PREV["$var"]+="${__CA_VAR_SOURCE[$var]} → "
+                __CA_VAR_SOURCE["$var"]="$file"
+                continue
+            fi
+
+            if [[ "$line" =~ ^[[:space:]]*(declare|typeset)[[:space:]]+-A[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+                var="${BASH_REMATCH[2]}"
+                [[ -n "${__CA_VAR_SOURCE[$var]:-}" ]] && \
+                    __CA_VAR_PREV["$var"]+="${__CA_VAR_SOURCE[$var]} → "
+                __CA_VAR_SOURCE["$var"]="$file"
+                continue
+            fi
+
+        done < "$file"
+
+    done < <(_ca_walk_bash_startup | awk '/^[0-9]/ {print $2}')
+    
+    _ca_print_tracked_vars | awk 'NF || prev {print} {prev=NF}'
+}
+
+# Usage: _ca_hyperlink "/path/to/file"
+_ca_hyperlink() {
+    local file="$1"
+    # OSC 8 sequence: \e]8;;URL\aTEXT\e]8;;\a
+    printf "${CYAN}\e]8;;file://%s\a%s\e]8;;\a${RESET}" "$file" "$file"
+}
+
+_ca_print_tracked_vars() {
+    local var file
+        printf "\n============= Sourced Variables ================ \n"    
+    for var in "${!__CA_VAR_SOURCE[@]}"; do
+        file="${__CA_VAR_SOURCE[$var]}"
+        printf "    %-30s  defined in: " "$var"
+        _ca_hyperlink "$file"
+
+  #      [[ -n "${__CA_VAR_PREV[$var]:-}" ]] && printf "   overridden from: ${CYAN}%s${RESET}\n" "${__CA_VAR_PREV[$var]}"
+        
+       printf "\n"
+    done | sort
+        printf "\n================ End of list =================== \n"
+}
+
+#-----------------------------------------------------------
+# Function: _ca_list_env
+# Usage:
+#   _ca_list_env           # List all exported environment variables, sorted
+#   _ca_list_env PATTERN   # List variables matching PATTERN, sorted
+#-----------------------------------------------------------
+_ca_list_env() {
+    local pattern="$1"
+    local cmd
+    local width name value wrap line
+
+    _ca_restore_path
+    command -v printenv &>/dev/null && cmd="printenv" || cmd="env"
+
+    # Determine terminal width with fallback
+    width=${COLUMNS:-$(tput cols 2>/dev/null)}
+    width=$((width - 4))
+    [[ $width -le 0 ]] && width=76
+
+    printf "\n    ============= Sourced Variables ================\n\n"
+
+    # Build command with optional pattern filter
+    if [[ -n "$pattern" ]]; then
+        cmd="$cmd | grep --color=auto -E \"$pattern\""
+    else
+        cmd="$cmd | sort"
+    fi
+
+    # Read variables
+    eval "$cmd" | while IFS='=' read -r name value; do
+        # Determine if variable should wrap by colon
+        case "$name" in
+            PATH|LD_LIBRARY_PATH|XDG_DATA_DIRS|LS_COLORS)
+                wrap=true ;;
+            *)
+                wrap=false ;;
+        esac
+
+        # Print variable name
+        printf "    ${CYAN}%s${RESET}=" "$name"
+
+        if $wrap; then
+            # Split colon-separated values safely
+            IFS=':' read -ra parts <<< "$value"
+            line=""
+            for part in "${parts[@]}"; do
+                # Start a new line if it would overflow width
+                if [ $(( ${#line} + ${#part} + 1 )) -gt $width ]; then
+                    # Print existing line
+                    printf "%s\n        " "$line"
+                    line="$part"
+                else
+                    [[ -z $line ]] && line="$part" || line="$line:$part"
+                fi
+            done
+            # Print remaining line
+            printf "%s\n" "$line"
+        else
+            # Fold normal variable values with indentation
+            echo "$value" | fold -s -w "$width" | sed '2,$s/^/        /'
+        fi
+    done
+
+    printf "\n    ================ End of list =================== \n"
+}
+
+#-----------------------------------------------------------
+# Function: _ca_walk_bash_startup
+# Purpose : Walk Bash startup files in correct semantic order
+#-----------------------------------------------------------
+_ca_walk_bash_startup() {
+    local phase
+    local -a roots ordered
+    local f
+
+    # Reset global state (important)
+    __CA_SOURCED_FILES_MAP=()
+    __CA_SOURCED_FILES_LIST=()
+    __CA_SOURCED_SCANNED=0
+
+    #-------------------------------------------------------
+    # Phase 1: Non-interactive
+    if [[ -n "$BASH_ENV" && -f "$BASH_ENV" ]]; then
+        roots+=( "$BASH_ENV" )
+        phase="non-interactive"
+    fi
+
+    #-------------------------------------------------------
+    # Phase 2: Login shell
+    if shopt -q login_shell; then
+        phase="login"
+
+        [[ -f /etc/profile ]] && roots+=( /etc/profile )
+        [[ -d /etc/profile.d ]] && roots+=( /etc/profile.d/*.sh )
+
+        if [[ -f ~/.bash_profile ]]; then
+            roots+=( ~/.bash_profile )
+        elif [[ -f ~/.bash_login ]]; then
+            roots+=( ~/.bash_login )
+        elif [[ -f ~/.profile ]]; then
+            roots+=( ~/.profile )
+        fi
+
+    #-------------------------------------------------------
+    # Phase 3: Interactive non-login
+    elif [[ $- == *i* ]]; then
+        phase="interactive"
+
+        [[ -f /etc/bash.bashrc ]] && roots+=( /etc/bash.bashrc )
+        [[ -f /etc/bashrc ]] && roots+=( /etc/bashrc )
+        [[ -f ~/.bashrc ]] && roots+=( ~/.bashrc )
+    fi
+
+    #-------------------------------------------------------
+    # Static discovery pass
+    for f in "${roots[@]}"; do
+        _ca_sourcedtree_single "$f" 0 "$CA_MAX_DEPTH"
+    done
+
+    #-------------------------------------------------------
+    # Emit ordered walk
+    # Root files first, then discovered children
+    for f in "${roots[@]}"; do
+        f=$(_ca_expand_path "$f")
+        [[ -f "$f" ]] && ordered+=( "$f" )
+    done
+
+    for f in "${__CA_SOURCED_FILES_LIST[@]}"; do
+        [[ " ${ordered[*]} " != *" $f "* ]] && ordered+=( "$f" )
+    done
+
+    #-------------------------------------------------------
+    # Output
+    printf '\n=============Bash startup walk (%s)=============\n' "$phase"
+    local i=0
+    for f in "${ordered[@]}"; do
+        printf '%02d  %s\n' "$((++i))" "$f"
+    done
+    printf "\n================ End of list =================== \n"
 }
 
 #------------------------------------------------------------------------
