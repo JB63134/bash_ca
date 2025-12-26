@@ -77,6 +77,7 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 | `-F`, `--forensic`   | `-t` and `-V `  forensic report                            |
 | `--fzf`              | Interactive command selection via fzf                      |
 | `-d`, `--diff`       | Show shell options changed from defaults                   |
+| `-l`, `--listenv`    | List all system variables (printenv / env)                 |
 | `-o`, `--overridden` | List overridden commands                                   |
 | `-p`, `--path`       | Inspect `$PATH` and highlight writable directories         |
 | `-s`, `--sourced`    | List sourced shell files                                   |
@@ -84,6 +85,7 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 | `-t`, `--trace`      | Show command resolution order                              |
 | `-u`, `--user`       | List user-writable commands                                |
 | `-V`, `--verify`     | Verify package integrity (dpkg, rpm, pacman)               |
+| `--var`              | List all variables loaded by sourced files                 |
 
 ---
 
