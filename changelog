@@ -1,3 +1,16 @@
+V1.1.0
+     ui/ux cleanup - always
+     
+     sourced file detection display now 
+     represents the order files are sourced
+     
+     new modes for variables
+     -l --listenv
+        list all system variables (printenv / env)
+        
+        -var
+        list all variables loaded by sourced files
+
 V1.0.85
      ui/ux cleanup
 
