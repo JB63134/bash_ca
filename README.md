@@ -94,8 +94,6 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 
 ## Installation
 
----
-
 ### 1. Manual Installation
 
 Clone the repository.
@@ -110,7 +108,6 @@ echo "source /usr/local/bin/bash_ca/.bash_ca" >> ~/.bashrc
 source ~/.bashrc
 ```
 
----
 
 ### 2. Debian/Ubuntu `.deb` Package
 
@@ -126,8 +123,6 @@ sudo dpkg -i ca_1.1.0.deb
 # Verify installation
 ca -h
 ```
-
----
 
 ---
 
