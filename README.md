@@ -94,13 +94,13 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 
 ## Installation
 
-# Download and Source bash_ca in your .bashrc file:
+### Download and Source bash_ca in your .bashrc file:
 
 ```bash
 source .bash_ca
 ````
 
-# .deb package
+### .deb package
 
 ```bash
 wget https://github.com/JB63134/bash_ca/releases/latest/download/ca_1.1.0.deb
