@@ -462,7 +462,7 @@ fi
         quote="${quote:0:1}"      # first character → "'"
        result="${raw#*"${quote}"}"  # removes everything up to first quote → "ls -alF'"
        result="${result%"${quote}"}"        # removes trailing "'" → "ls -alF"
-        alias_expansion=$(_h_expand_vars "$result")
+        alias_expansion=$(_ca_expand_vars "$result")
         alias_def=$(alias "$cmd")
         
         printf "%s├─ ${CYAN}'%s' ${RESET}is an alias:\n" "$CA_INDENT" "$cmd"
