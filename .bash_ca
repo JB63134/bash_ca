@@ -10,6 +10,8 @@ case $- in
       *) return;;
 esac
 
+_ca_version="1.1.20"
+
 # shellcheck disable=SC2034
 ca_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
 # shellcheck disable=SC2034
@@ -67,7 +69,6 @@ ca() {
         YELLOW='\033[93m'
         BPURP='\033[95m'
         GREY='\033[90m'  # safe gray
-#        GREY='\033[38;5;245m'  # proper neutral gray
         RESET='\033[0m'
         UNLINE='\033[4m'
         STOPUNLINE='\033[0m'
@@ -348,7 +349,7 @@ declare -A __CA_KEYWORD_DESC=(
     ["]]"]="Ends a conditional test expression."
 )
 
-if [[ $ctype == keyword ]]; then
+if [[ $ctype == "keyword" ]]; then
     printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$CA_INDENT" "$cmd"
 
     if help "$cmd" &>/dev/null; then
@@ -431,7 +432,11 @@ fi
         else
             printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$CA_INDENT" "$found_location" "$line"
         fi
-        _ca_show_hash "$CA_INDENT" "$cmd"
+        
+        # Compute SHA using _ca_show_hash
+        sha=$(_ca_show_hash "$cmd" 2>/dev/null)      
+        printf "%s    ↳ SHA256: %s%s%s\n" "$CA_INDENT" "${CYAN}" "$sha" "${RESET}"
+
         printf "%s    ↳ Showing preview of function: ${CYAN}%s${RESET}\n\n"  "$CA_INDENT" "$cmd"     
            
         local func_content
@@ -492,7 +497,12 @@ fi
         if [[ -z "$found_location" ]]; then
             printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$CA_INDENT"
         fi     
-        _ca_show_hash "$CA_INDENT" "$cmd"
+
+        # Compute SHA using _ca_show_hash
+        sha=$(_ca_show_hash "$cmd" 2>/dev/null)      
+        printf "%s    ↳ SHA256: %s%s%s\n" "$CA_INDENT" "${CYAN}" "$sha" "${RESET}"
+        
+        #"SHA256: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$sha"
         # Handle alias expansion with chain/pipeline parsing
         if [[ "$alias_expansion" =~ [\|\&\;] ]]; then
             local segments=()
@@ -575,7 +585,11 @@ fi
         else                         printf "${CYAN}%.1f TB${RESET}\n" "$(echo "$size_bytes / 1099511627776" | bc -l)"
         fi
         
-        _ca_show_hash "$CA_INDENT" "$cmd_path"
+        
+        # Compute SHA using _ca_show_hash
+        sha=$(_ca_show_hash "$cmd" 2>/dev/null)      
+        printf "%s    ↳ SHA256: %s%s%s\n" "$CA_INDENT" "${CYAN}" "$sha" "${RESET}"
+        
         # Root privilege detection
         local requires_root=0
         local root_reason=""
@@ -785,7 +799,10 @@ _ca_usage() {
            -f --functions	List all USER functions in the enviroment
            -fv --funverb	Verbose - list ALL functions in the enviroment
            --fzf                Use fzf to interactivly search for commands  
+           -F --full	        Full report - flags -t and -V
            -d --diff	        list shell options that have changed from default in the enviroment
+           -l --listenv 	List all system variables (printenv / env)
+           --var	        List all variables loaded by sourced files 
            -o --overridden      List commands that override others
            -p --path            List all directories in $PATH and highlight writable directories.
            -s --sourced         List all sourced files in the enviroment.
@@ -797,9 +814,9 @@ _ca_usage() {
      Examples:
            ca                   # Automatically analyzes your most recent command
            ca awk               # Analyzes 'awk'
-           ca -t awk            # Which awk runs and why that one?
-           
+           ca -t awk            # Which awk runs and why that one?         
 EOF
+
 }
 
 #------------------------------------------------------------------------
@@ -807,13 +824,10 @@ EOF
 # Purpose : Display version information.
 #------------------------------------------------------------------------
 _ca_ver() {
+
+    printf "\n     ca v%s  — Bash Command Analyzer\n" "$_ca_version"
     cat <<'EOF'
-
-     ca v1.1.0 — Bash Command Analyzer
-     Author : John Blair
-          
      MIT License
-
      Copyright (c) 2025 John Blair
 
      Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -923,13 +937,14 @@ _ca_expand_vars() {
 # Purpose: Recursively scan .bashrc for ALL files that are sourced. including conditionals.
 #------------------------------------------------------------------------
 _ca_sourcedtree() {
-    local file files depth 
+    local file files depth max_depth
     depth=0
-    [[ -n "$BASH_ENV" && -f "$BASH_ENV" ]] && files+=("$BASH_ENV")
+    max_depth="${MAX_DEPTH:-5}"
+    files=("$BASH_ENV")
 
-if shopt -q login_shell; then
-    [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
-    [[ -f /etc/profile && -r /etc/profile ]] && files+=( /etc/profile )
+    if shopt -q login_shell; then
+        [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
+        [[ -f /etc/profile && -r /etc/profile ]] && files+=( /etc/profile )
         if [[ -f ~/.bash_profile && -r ~/.bash_profile ]]; then 
             files+=( ~/.bash_profile )
         elif [[ -f ~/.bash_login && -r ~/.bash_login ]]; then 
@@ -937,12 +952,13 @@ if shopt -q login_shell; then
         elif [[ -f ~/.profile && -r ~/.profile ]]; then 
             files+=( ~/.profile )
         fi
-else
-    # Non-login interactive shell
-    [[ -d /etc/bash.bashrc.d ]] && files+=( /etc/bash.bashrc.d/*.sh )
-    [[ -f ~/.bashrc && -r ~/.bashrc ]] && files+=( ~/.bashrc )
-    [[ -f /etc/bash.bashrc && -r /etc/bash.bashrc ]] && files+=( /etc/bash.bashrc )
-    [[ -f /etc/bashrc && -r /etc/bashrc ]] && files+=( /etc/bashrc )
+    else
+        # Non-login interactive shell
+        [[ -d /etc/bash.bashrc.d ]] && files+=( /etc/bash.bashrc.d/*.sh )
+        [[ -f ~/.bashrc && -r ~/.bashrc ]] && files+=( ~/.bashrc )
+        [[ -f /etc/bash.bashrc && -r /etc/bash.bashrc ]] && files+=( /etc/bash.bashrc )
+        [[ -f /etc/bashrc && -r /etc/bashrc ]] && files+=( /etc/bashrc )
+    fi
    
     if [ -f /etc/os-release ]; then
         while IFS='=' read -r key value; do
@@ -958,16 +974,15 @@ else
                     ;;
             esac
         done < /etc/os-release
-
-        if [[ -n "$is_rhel_like" ]]; then
-            # This system is Fedora/RHEL-like
-            files+=( /etc/profile.d/*.sh )
-        fi
     fi
-fi  
+    
+    if [[ -n "$is_rhel_like" ]]; then
+        # This system is Fedora/RHEL-like
+        [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
+    fi  
   
     for file in "${files[@]}"; do
-        _ca_sourcedtree_single "$file" "$depth" "$CA_MAX_DEPTH"
+        _ca_sourcedtree_single "$file" "$depth" "$max_depth"
     done
 }
 
@@ -1810,7 +1825,7 @@ _ca_sourced_files() {
 
         [[ -f /etc/profile ]] && roots+=( /etc/profile )
         [[ -d /etc/profile.d ]] && roots+=( /etc/profile.d/*.sh )
-
+    
         if [[ -f ~/.bash_profile ]]; then
             roots+=( ~/.bash_profile )
         elif [[ -f ~/.bash_login ]]; then
@@ -1828,6 +1843,27 @@ _ca_sourced_files() {
         [[ -f /etc/bashrc ]] && roots+=( /etc/bashrc )
         [[ -f ~/.bashrc ]] && roots+=( ~/.bashrc )
     fi
+
+    if [ -f /etc/os-release ]; then
+        while IFS='=' read -r key value; do
+            # Remove surrounding quotes if present
+            value="${value%\"}"
+            value="${value#\"}"
+            case "$key" in
+                ID)
+                    [[ "$value" == "fedora" || "$value" == "rhel" ]] && is_rhel_like=1
+                    ;;
+                ID_LIKE)
+                    [[ "$value" == *"rhel"* ]] && is_rhel_like=1
+                    ;;
+            esac
+        done < /etc/os-release
+    fi
+    
+    if [[ -n "$is_rhel_like" ]]; then
+        # This system is Fedora/RHEL-like
+        [[ -d /etc/profile.d ]] && roots+=( /etc/profile.d/*.sh )
+    fi 
 
     #-------------------------------------------------------
     # Static discovery pass
@@ -1982,11 +2018,13 @@ _ca_detect_pkg_manager() {
 # Purpose : verify package for a given command
 #------------------------------------------------------------------------
 _ca_verify_package() {
-
     local cmd="$1"
-    local pkg_mgr pkg_name pkg_lines=()
-    local sha pkg verify status="${GREEN}CLEAN${RESET}"
+    local ctype pkg status cmd_path cmd_real verify pkg_mgr bash_hit
+    sha="Unknown"
+    status="${GREEN}CLEAN${RESET}"
+    bash_hit=0
     
+    # guard against trash commands
     ctype=$(type -t -- "$cmd" 2>/dev/null)
     if [[ -z "$ctype" ]]; then
         printf "├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$cmd"
@@ -1994,89 +2032,125 @@ _ca_verify_package() {
         return 1
     fi
 
-if [[ "$ctype" == "file" ]]; then
-
-    cmd_path=$(command -v "$cmd") 
-    cmd_real=$(readlink -f "$cmd_path" 2>/dev/null || echo "$cmd_path")
+    # Compute SHA using _ca_show_hash
+    sha=$(_ca_show_hash "$cmd" 2>/dev/null)
     
-    sha=$(sha256sum "$cmd_real" 2>/dev/null | awk '{print $1}')
-    pkg_mgr=$(_ca_detect_pkg_manager)
-    [[ -z "$pkg_mgr" ]] && return 1  # no package manager detected
-
-    case "$pkg_mgr" in
-        dpkg)
-            pkg=$(dpkg -S "$cmd_real" 2>/dev/null | cut -d: -f1)
-            if [[ -n "$pkg" ]]; then
-                verify=$(dpkg -V "$pkg" | grep -F "$cmd_real")
-            fi
-            ;;
-        rpm)
-            if pkg=$(rpm -qf "$cmd_real" 2>/dev/null); then
-                verify=$(rpm -V "$pkg" | grep -F "$cmd_real")
-            fi
-            ;;   
-        pacman)
-            pkg=$(pacman -Qo "$cmd_real" 2>/dev/null | cut -d' ' -f5)
-            if [[ -n "$pkg" ]]; then
-                verify=$(pacman -Qk "$pkg" 2>/dev/null | grep -F "$cmd_real")
-            fi
-            ;;
-    esac
-
-    if [[ -n "$verify" ]]; then
-        status="${RED}TAMPERED${RESET}"
-    elif [[ -z "$pkg" ]]; then
-        status="${YELLOW}User Installed${RESET}"
-    fi
-
     printf "├─ Examining Package Integrity:\n"
     printf "    ├─ Command: ${CYAN}%s${RESET}\n" "$cmd"
-    if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
-        printf "    ├─ Resolves to: ${CYAN}%s${RESET} - ${YELLOW}Symlink to [ %s ]${RESET}\n" "$cmd" "$(basename "$cmd_real")"
-    else
-        printf "    ├─ Resolves to: ${CYAN}%s${RESET}\n" "$cmd"
-    fi
-    printf "    ⎟\n"  
-    if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
-        printf "    ├─ Package: ${YELLOW}%s${RESET}\n" "${pkg:-none}"
-    else
-        printf "    ├─ Package: ${CYAN}%s${RESET}\n" "${pkg:-none}"
-    fi
-    printf "    ├─ Path: %s\n" "$cmd_real"
-    printf "    ├─ SHA256: %s\n" "$sha"    
-    printf "    └─ Status: %s\n" "$status"
 
-fi    
+    case "$ctype" in
+        alias)
+            pkg="${YELLOW}Not From a Package${RESET}"
+            status="${YELLOW}Alias (not verifiable)${RESET}"
+            printf "    ├─ Package: ${CYAN}%s${RESET}\n" "${pkg}"
+            printf "    ├─ SHA256: %s\n" "$sha"    
+            printf "    └─ Status: %s\n" "$status"
+            return 0
+            ;;
+        function)
+            pkg="${YELLOW}Not From a Package${RESET}"
+            status="${YELLOW}Function (not verifiable)${RESET}"
+            printf "    ├─ Package: ${CYAN}%s${RESET}\n" "${pkg}"
+            printf "    ├─ SHA256: %s\n" "$sha"    
+            printf "    └─ Status: %s\n" "$status"
+            return 0           
+            ;;
+        builtin|keyword)
+            bash_hit=1
+            ctype="file"
+            ;;
+    esac    
+    
+    if [[ "$ctype" == "file" ]]; then      
+        cmd_path=$(command -v "$cmd") 
+        cmd_real=$(readlink -f "$cmd_path" 2>/dev/null || echo "$cmd_path")
+   
+        # Compute SHA using _ca_show_hash
+        sha=$(_ca_show_hash "$cmd_real" 2>/dev/null)
+           
+        pkg_mgr=$(_ca_detect_pkg_manager)
+        [[ -z "$pkg_mgr" ]] && return 1  # no package manager detected
+
+        if (( bash_hit == 1 )); then 
+             cmd_real=/usr/bin/bash
+             sha=$(_ca_show_hash "$cmd_real" 2>/dev/null)
+        fi
+                 
+        case "$pkg_mgr" in
+            dpkg)
+                pkg=$(dpkg -S "$cmd_real" 2>/dev/null | cut -d: -f1)
+                if [[ -n "$pkg" ]]; then
+                    verify=$(dpkg -V "$pkg" | grep -F "$cmd_real")
+                fi
+                ;;
+            rpm)
+                if pkg=$(rpm -qf "$cmd_real" 2>/dev/null); then
+                    verify=$(rpm -V "$pkg" | grep -F "$cmd_real")
+                fi
+                ;;   
+            pacman)
+                pkg=$(pacman -Qo "$cmd_real" 2>/dev/null | cut -d' ' -f5)
+                if [[ -n "$pkg" ]]; then
+                    verify=$(pacman -Qk "$pkg" 2>/dev/null | grep -F "$cmd_real")
+                fi
+                ;;
+        esac
+
+        if [[ -n "$verify" ]]; then
+            status="${RED}TAMPERED${RESET}"
+        elif (( bash_hit == 1 )); then
+            status="${GREEN}CLEAN (builtin or keyword)${RESET}"           
+        elif [[ -z "$pkg" ]]; then
+            status="${YELLOW}USER INSTALLED (not verifiable)${RESET}"   
+        fi
+
+        if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
+            printf "    ├─ Resolves to: ${CYAN}%s${RESET} → ${BPURP}[ %s ]${RESET}\n" "$cmd" "$(basename "$cmd_real")"
+        else
+            printf "    ├─ Resolves to: ${CYAN}%s${RESET}\n" "$cmd"
+        fi
+    
+        printf "    ⎟\n"
+            
+        if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
+            printf "    ├─ Package: ${BPURP}%s${RESET}\n" "${pkg:-none}"
+        elif [[ -n "$pkg" ]]; then  # pkg present
+            printf "    ├─ Package: ${CYAN}%s${RESET}\n" "$pkg"
+        else                        # pkg empty
+            printf "    ├─ Package: %sNot From a Package%s\n" "$YELLOW" "$RESET"
+        fi
+        printf "    ├─ Path: ${CYAN}%s${RESET}\n" "$cmd_real"
+        printf "    ├─ SHA256: ${CYAN}%s${RESET}\n" "$sha"                
+        printf "    └─ Status: %s\n" "$status"   
+    fi
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_show_hash  # usage: _ca_show_hash "$CA_INDENT" "$cmd_path"
+# Function: _ca_show_hash  # usage: _ca_show_hash "$cmd_path"
 # Purpose : calc hashes
 #------------------------------------------------------------------------
 _ca_show_hash() {
-    local CA_INDENT="$1"
-    local cmd="$2"
-    local ctype 
-    local hash=""
+    local cmd="$1"
+    local ctype hash=""
     ctype=$(type -t -- "$cmd" 2>/dev/null)
     
     case "$ctype" in
-        alias)
-            # hash the resolved alias string
+        alias) 
             hash=$(alias "$cmd" 2>/dev/null | awk -F"=" '{print $2}' | sha256sum | awk '{print $1}')
             ;;
-        function)
-            # hash the function body
-            hash=$(declare -f "$cmd" | sha256sum | awk '{print $1}')
+        function) 
+            hash=$(declare -f "$cmd" | sha256sum | awk '{print $1}') 
             ;;
-        file)
+        file) 
             local path
             path=$(command -v "$cmd")
-            [[ -x "$path" ]] && hash=$(sha256sum "$path" | awk '{print $1}')
+            if [[ -x "$path" ]]; then
+                hash=$(sha256sum "$path" | awk '{print $1}')
+            fi
             ;;
     esac
-
-    [[ -n "$hash" ]] && printf "%s    ↳ SHA256: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$hash"
+    
+    printf "%s" "$hash"
 }
 
 #-----------------------------------------------------------
@@ -2613,7 +2687,7 @@ _ca_hyperlink() {
 
 _ca_print_tracked_vars() {
     local var file
-        printf "\n============= Sourced Variables ================ \n"    
+        printf "\n============= Sourced Variables ================ \n\n"    
     for var in "${!__CA_VAR_SOURCE[@]}"; do
         file="${__CA_VAR_SOURCE[$var]}"
         printf "    %-30s  defined in: " "$var"
