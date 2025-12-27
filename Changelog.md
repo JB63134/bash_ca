@@ -1,5 +1,14 @@
 # `bash_ca` Changelog
 
+##V1.1.20
+- ui/ux stuff 
+- sha256 hash function cleaned up
+- found a bug in sourced file display - files were found but did not display properly in Fedora/RHEL like systems
+
+##V1.1.10  
+- package verification totally rewritten 
+- now supports idiots like me trying to run aliases and functions through package verification
+
 ## V1.1.0
 - UI/UX cleanup
 - Sourced file detection now shows the order files are sourced
