@@ -26,7 +26,7 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 - Recursively analyzes alias expansions and command chains
 - Traces command resolution order and `$PATH` precedence
 - Automatically analyzes your **most recent command** if none is specified
-- Prevents infinite recursion and cyclic alias/function loops
+- Prevents infinite recursion and cyclic alias loops
 
 ### Alias, Function, and Builtin Inspection
 - Displays alias expansions and where they are defined
@@ -47,7 +47,7 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 ### Shell Environment Visibility
 - Lists all sourced shell files, including conditional and loop-based sourcing
 - Lists all environment variables
-- Lists all variables loaded by sourced files
+- Lists all variables loaded by sourced files that are found
 - Scans `$PATH` and highlights writable directories
 - Identifies user-writable commands
 - Shows shell options that differ from defaults
