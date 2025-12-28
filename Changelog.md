@@ -1,5 +1,9 @@
 # `bash_ca` Changelog
 
+## V1.1.25
+- ui/ux stuff 
+- testing on fedora   -   path manipulation bug fixed
+
 ## V1.1.20
 - ui/ux stuff 
 - sha256 hash function cleaned up
