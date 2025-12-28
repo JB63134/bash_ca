@@ -4,20 +4,12 @@
 # Main Function: ca                                                                         
 # Purpose: Analyzes a Bash command, alias, builtin, keyword,  function, or binary
 #------------------------------------------------------------------------
-# If not running interactively, don't do anything
-case $- in
-    *i*) ;;
-      *) return;;
-esac
-
-_ca_version="1.1.20"
-
+_ca_version="1.1.25"
 # shellcheck disable=SC2034
 ca_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
 # shellcheck disable=SC2034
 ca_optional_deps=(tput fzf batcat bat dpkg rpm pacman)
-
-OLD_PATH="$PATH"
+__CA_OLD_PATH="$PATH"
 
 declare -g CA_INDENT=""
 declare -g CA_MAX_DEPTH=8
@@ -29,9 +21,16 @@ declare -gA __CA_SEEN_COMMANDS
 declare -gA __CA_SEEN_BUILTINS
 declare -gA __CA_SHADOW_SEEN
 declare -gA __CA_VISITED          
+
 complete -F _ca_completion ca
 
 ca() {
+    # If not running interactively, don't do anything
+    case $- in
+        *i*) ;;
+        *) return;;
+    esac
+    
     # -------------------------
     # LOCAL Variables
     # -------------------------
@@ -215,7 +214,7 @@ ca() {
         printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$CA_INDENT" "$cmd"
         printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$CA_INDENT" "$cmd"
         printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
-        printf "%s          ${CYAN}%s${RESET} -- Ends a conditional test expression.\n" "$CA_INDENT" "$cmd"
+        printf "%s          ${CYAN}%s${RESET} -- Ends a conditional test expression.\n\n" "$CA_INDENT" "$cmd"
         return 0
     fi
     
@@ -355,10 +354,11 @@ if [[ $ctype == "keyword" ]]; then
     if help "$cmd" &>/dev/null; then
         printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$CA_INDENT" "$cmd"
         help "$cmd" 2>/dev/null | sed 's/^/    /'
+        printf "\n"
     elif [[ -n "${__CA_KEYWORD_DESC[$cmd]}" ]]; then
         printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$CA_INDENT" "$cmd"
         printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
-        printf "%s          ${CYAN}%s${RESET} -- %s\n" "$CA_INDENT" "$cmd" "${__CA_KEYWORD_DESC[$cmd]}"
+        printf "%s          ${CYAN}%s${RESET} -- %s\n\n" "$CA_INDENT" "$cmd" "${__CA_KEYWORD_DESC[$cmd]}"
     fi
     return 0
 fi
@@ -398,6 +398,7 @@ fi
         if (( ${#nextcmd[@]} > 0 )); then
             ca "${nextcmd[*]}" $((depth + 1))
         fi
+        printf "\n"
         return 0
     fi
         
@@ -443,7 +444,7 @@ fi
         func_content=$(declare -f "$cmd")
         _ca_highlight_script "$func_content" "$CA_INDENT" "$file" "$line"
         
-        printf "\n%s    ======= End of function preview =======\n" "$CA_INDENT"   
+        printf "\n%s    ======= End of function preview =======\n\n" "$CA_INDENT"   
         return 0
     fi
     
@@ -534,6 +535,7 @@ fi
             else
                 ca "$alias_expansion" $((depth + 1))
             fi
+            printf "\n"
             return 0
         fi
     fi
@@ -768,7 +770,7 @@ _ca_lookup_package "$cmd_path" "$CA_INDENT"
             if [[ -r "$cmd_path" ]]; then
                 printf "\n"
                 _ca_highlight_script "$cmd_path" "$CA_INDENT" " " " "
-                printf "\n%s    ========== End of script preview ========= \n" "$CA_INDENT"
+                printf "\n%s    ========== End of script preview ========= \n\n" "$CA_INDENT"
             fi
             return 0
         else
@@ -857,8 +859,8 @@ EOF
 #------------------------------------------------------------------------
 _ca_add_admin_paths() {
     # Save PATH if not already saved 
-    if [[ -z "$OLD_PATH" ]]; then
-        OLD_PATH="$PATH"
+    if [[ -z "$__CA_OLD_PATH" ]]; then
+        __CA_OLD_PATH="$PATH"
     fi
 
     local admin_dirs=(
@@ -884,7 +886,7 @@ _ca_add_admin_paths() {
     )
         
     for dir in "${admin_dirs[@]}"; do
-        [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]] && PATH="$dir:$PATH"
+        [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]] && PATH="$PATH:$dir"
     done
 }
 
@@ -893,9 +895,9 @@ _ca_add_admin_paths() {
 # Automatically restore PATH when leaving scope
 #------------------------------------------------------------------------
 _ca_restore_path() {
-    if [[ -n "$OLD_PATH" ]]; then
-        PATH="$OLD_PATH"
-        unset OLD_PATH
+    if [[ -n "$__CA_OLD_PATH" ]]; then
+        PATH="$__CA_OLD_PATH"
+        unset __CA_OLD_PATH
     fi
 }
 
@@ -1271,7 +1273,7 @@ _ca_overridden() {
     _ca_function_override
     printf "\n"  
     _ca_builtin_override
-    printf "\n================ End of list =================== \n"
+    printf "\n================ End of list =================== \n\n"
 }
 
 #------------------------------------------------------------------------
@@ -1428,7 +1430,7 @@ _ca_display_files_scan() {
     _ca_sgid_scan
     printf "\n"
     _ca_find_world_writable_dirs
-    printf "\n================ End of list =================== \n"
+    printf "\n================ End of list =================== \n\n"
 }
 #------------------------------------------------------------------------
 # Function: _ca_sgid_scan
@@ -1522,7 +1524,7 @@ _ca_restore_path
         printf "    ↳ %-40s %-15s %-20s %-10s\n" "$dir" "$perms" "$owner_g" "$note"
     fi
     done
-    printf "\n================ End of list =================== \n"
+    printf "\n================ End of list =================== \n\n"
 }
 
 #------------------------------------------------------------------------
@@ -1894,7 +1896,7 @@ _ca_sourced_files() {
         # Print clickable link
         printf "    ↳ \e]8;;file://%s\a%s\e]8;;\a\n" "$f" "$clickable_text"
     done
-    printf "\n================ End of list =================== \n"
+    printf "\n================ End of list =================== \n\n"
 }
 
 #------------------------------------------------------------------------
@@ -2182,7 +2184,7 @@ _ca_list_user_bin() {
         printf "%s%s\n\n" "$CA_INDENT" "No user-writable scripts or binaries found."
     fi
 
-    printf "\n================ End of list =================== \n"
+    printf "\n================ End of list =================== \n\n"
 }
 
 # ----------------------------------------------------------------------
@@ -2205,7 +2207,7 @@ _ca_function() {
             _ca_print_fn "$fn" "$CA_INDENT"
         done
     fi
-            printf "\n================ End of list =================== \n"
+            printf "\n================ End of list =================== \n\n"
 }
 
 # ----------------------------------------------------------------------
@@ -2279,12 +2281,12 @@ _ca_aliases() {
             "$file" "$line_number")
 
         # Print entire line as clickable link
-        printf "%s %-10s  -- Defined in:\e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$alias_name" "$file" "$clickable_text"
+        printf "%s %-10s  -- Defined in:\e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$alias_name" "$file" "$clickable_text"\n
     done
 
     # Restore nullglob if we changed it
     (( nullglob_was == 1 )) && shopt -u nullglob
-        printf "\n================ End of list =================== \n"
+        printf "\n================ End of list =================== \n\n"
 }
 
 #------------------------------------------------------------------------
@@ -2468,7 +2470,7 @@ if (( path_winner )); then
     # ELF interpreter
     if file "$canonical" 2>/dev/null | grep -q ELF; then
         local interp
-        interp=$(readelf -l "$canonical" 2>/dev/null | awk '/interpreter/ {print $NF}')
+        interp=$(readelf -l "$canonical" 2>/dev/null | awk '/interpreter/ {gsub(/[][]/, "", $NF); print $NF}')
         [[ -n $interp ]] && printf "    ⎟    ↳ ELF interpreter: ${CYAN}%s${RESET}\n" "$interp"
     fi
 
@@ -2613,7 +2615,7 @@ _ca_bash_option_diff() {
         printf "%sNo shell options differ from default.\n" "$CA_INDENT"
     fi
 
-    printf "\n================ End of list =================== \n"
+    printf "\n================ End of list =================== \n\n"
 
     rm -f "$tmp_default" "$tmp_current"
 }
@@ -2697,7 +2699,7 @@ _ca_print_tracked_vars() {
         
        printf "\n"
     done | sort
-        printf "\n================ End of list =================== \n"
+        printf "\n================ End of list =================== \n\n"
 }
 
 #-----------------------------------------------------------
@@ -2763,7 +2765,7 @@ _ca_list_env() {
         fi
     done
 
-    printf "\n    ================ End of list =================== \n"
+    printf "\n    ================ End of list =================== \n\n"
 }
 
 #-----------------------------------------------------------
@@ -2838,7 +2840,7 @@ _ca_walk_bash_startup() {
     for f in "${ordered[@]}"; do
         printf '%02d  %s\n' "$((++i))" "$f"
     done
-    printf "\n================ End of list =================== \n"
+    printf "\n================ End of list =================== \n\n"
 }
 
 #------------------------------------------------------------------------
