@@ -135,7 +135,7 @@ wget https://github.com/JB63134/bash_ca/releases/latest/download/bash_ca-1.1.25-
 sudo dnf install ./bash_ca-1.1.25-1.noarch.rpm
 
 # Verify installation
-h -h
+ca -h
 ```
 ---
 
