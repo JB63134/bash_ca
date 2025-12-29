@@ -115,15 +115,28 @@ A quick method for Debian-based systems:
 
 ```bash
 # Download the latest release
-wget https://github.com/JB63134/bash_ca/releases/latest/download/ca_1.1.0.deb
+wget https://github.com/JB63134/bash_ca/releases/latest/download/ca_1.1.25.deb
 
 # Install using dpkg
-sudo dpkg -i ca_1.1.0.deb
+sudo dpkg -i ca_1.1.25.deb
 
 # Verify installation
 ca -h
 ```
+### 3. Fedora `.rpm` Package
 
+A quick method for RHEL-based systems:
+
+```bash
+# Download the latest release
+wget https://github.com/JB63134/bash_ca/releases/latest/download/bash_ca-1.1.25-1.noarch.rpm
+
+# Install using dpkg
+sudo dnf install ./bash_ca-1.1.25-1.noarch.rpm
+
+# Verify installation
+h -h
+```
 ---
 
 ## Usage
