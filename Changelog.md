@@ -1,5 +1,17 @@
 # `bash_ca` Changelog
 
+## V2.0.0
+- Major refactor  
+- UI/UX improvements 
+- Option flags refined (see --help)
+- Argument handling rewritten with graceful error paths
+- Trace mode now properly recognizes/reports disabled builtins 
+- Package verification ui and wording cleaned up to avoid confusion.
+- Removed greeting banner
+- Removed recursive analysis of aliases and pipelines
+- No longer infers last command via `fc` when no argument is supplied
+- Removed undocumented easter egg 
+
 ## V1.1.25
 - ui/ux stuff 
 - testing on fedora   -   path manipulation bug fixed

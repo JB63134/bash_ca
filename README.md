@@ -4,7 +4,7 @@
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.1.25-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-1.5.0-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
 `ca` is an interactive Bash command analyzer that explains **what a command really is**, **where it comes from**, and **why Bash resolves it the way it does**.
@@ -15,7 +15,6 @@ Think of it as `type`, `which`, `help`, `file`, `ldd`, `stat`, and half your she
 
 Requires: Bash ≥ V4.4 and GNU utils  
 Package Lookup: supports dpkg, rpm, and pacman   
-Sourced file detection: supports Debian and Fedora / RHEL style setups  
    
 ---
 
@@ -23,10 +22,8 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 
 ### Command Resolution
 - Detects whether a command is an **alias, function, builtin, keyword, or external binary**
-- Recursively analyzes alias expansions and command chains
 - Traces command resolution order and `$PATH` precedence
 - Automatically analyzes your **most recent command** if none is specified
-- Prevents infinite recursion and cyclic alias loops
 
 ### Alias, Function, and Builtin Inspection
 - Displays alias expansions and where they are defined
@@ -73,22 +70,23 @@ Sourced file detection: supports Debian and Fedora / RHEL style setups
 | Option               | Description                                                |
 | -------------------- | ---------------------------------------------------------- |
 | `-h`, `--help`       | Show help text                                             |
-| `-v`, `--version`    | Show version information                                   |
-| `-a`, `--aliases`    | List all aliases                                           |
-| `-f`, `--functions`  | List user-defined functions                                |
-| `-fv`, `--funverb`   | List all functions (verbose)                               |
-| `-F`, `--forensic`   | `-t` and `-V `  forensic report                            |
-| `--fzf`              | Interactive command selection via fzf                      |
-| `-d`, `--diff`       | Show shell options changed from defaults                   |
-| `-l`, `--listenv`    | List all system variables (printenv / env)                 |
+| `--version`          | Show version information                                   |
+| `-t`, `--trace`      | Show command resolution order mapping                      |
 | `-o`, `--overridden` | List overridden commands                                   |
-| `-p`, `--path`       | Inspect `$PATH` and highlight writable directories         |
+| `-a`, `--alias`      | List all aliases                                           |
+| `-f`, `--function`   | List user-defined functions                                |
+| `-F`, `--functionv`  | List all functions (verbose)                               |
+| `-d`, `--diff`       | Show shell options changed from defaults                   |
+| `-e`, `--env`        | List all system variables (printenv / env)                 |
 | `-s`, `--sourced`    | List sourced shell files                                   |
+| `-l`,`--listvar`     | List all variables loaded by sourced files                 |
+| `-p`, `--path`       | Inspect `$PATH` and highlight writable directories         |
+| `-u`, `--user`       | List USER-writable commands                                |
 | `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories |
-| `-t`, `--trace`      | Show command resolution order                              |
-| `-u`, `--user`       | List user-writable commands                                |
-| `-V`, `--verify`     | Verify package integrity (dpkg, rpm, pacman)               |
-| `--var`              | List all variables loaded by sourced files                 |
+| `-v`, `--verify`     | Verify package integrity (dpkg, rpm, pacman)               |
+| `-r`, `--report`     | Full report (includes -t, ca [command], and -v)            |
+| `--fzf`              | Interactive command selection via fzf                      |
+
 
 ---
 
@@ -115,10 +113,10 @@ A quick method for Debian-based systems:
 
 ```bash
 # Download the latest release
-wget https://github.com/JB63134/bash_ca/releases/latest/download/ca_1.1.25.deb
+wget https://github.com/JB63134/bash_ca/releases/latest/download/ca_2.0.0.deb
 
 # Install using dpkg
-sudo dpkg -i ca_1.1.25.deb
+sudo dpkg -i ca_2.0.0.deb
 
 # Verify installation
 ca -h
@@ -129,10 +127,10 @@ A quick method for RHEL-based systems:
 
 ```bash
 # Download the latest release
-wget https://github.com/JB63134/bash_ca/releases/latest/download/bash_ca-1.1.25-1.noarch.rpm
+wget https://github.com/JB63134/bash_ca/releases/latest/download/bash_ca-2.0.0-1.noarch.rpm
 
 # Install using dpkg
-sudo dnf install ./bash_ca-1.1.25-1.noarch.rpm
+sudo dnf install ./bash_ca-2.0.0-1.noarch.rpm
 
 # Verify installation
 ca -h
@@ -145,16 +143,13 @@ ca -h
 ca [command]
 ```
 
-If no command is provided, `ca` analyzes the **last executed command**.
-
 ### Examples
 
 ```bash
-ca
 ca ls
-ca awk
-ca -o
+ca -v sed
 ca -t awk
+ca -r bash
 ```
 ---
 
