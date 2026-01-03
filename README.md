@@ -4,7 +4,7 @@
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.0.1-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-2.0.15-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
 `ca` is an interactive Bash command analyzer that explains **what a command really is**, **where it comes from**, and **why Bash resolves it the way it does**.
@@ -88,6 +88,7 @@ Package Lookup: supports dpkg, rpm, and pacman
 | `--fzf`              | Interactive command selection via fzf                      |
 
 
+
 ---
 
 ## Installation
@@ -113,10 +114,10 @@ A quick method for Debian-based systems:
 
 ```bash
 # Download the latest release
-wget https://github.com/JB63134/bash_ca/releases/latest/download/ca_2.0.0.deb
+wget https://github.com/JB63134/bash_ca/releases/latest/download/ca_2.0.15.deb
 
 # Install using dpkg
-sudo dpkg -i ca_2.0.0.deb
+sudo dpkg -i ca_2.0.15.deb
 
 # Verify installation
 ca -h
@@ -127,15 +128,16 @@ A quick method for RHEL-based systems:
 
 ```bash
 # Download the latest release
-wget https://github.com/JB63134/bash_ca/releases/latest/download/bash_ca-2.0.0-1.noarch.rpm
+wget https://github.com/JB63134/bash_ca/releases/latest/download/bash_ca-2.0.15-1.noarch.rpm
 
 # Install using dpkg
-sudo dnf install ./bash_ca-2.0.0-1.noarch.rpm
+sudo dnf install ./bash_ca-2.0.15-1.noarch.rpm
 
 # Verify installation
 ca -h
 ```
 ---
+
 
 ## Usage
 
