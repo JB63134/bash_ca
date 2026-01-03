@@ -9,7 +9,7 @@
 # Copyright (c) 2025 John Blair
 # Licensed under the MIT License. See LICENSE file for details.        
 #-----------------------------------------------------------------------------------------------
-__CA_version="2.0.0"
+__CA_version="2.0.1"
 # shellcheck disable=SC2034
 __CA_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
 # shellcheck disable=SC2034
@@ -808,16 +808,12 @@ _ca_sourcedtree() {
     max_depth="${MAX_DEPTH:-5}"
     files=("$BASH_ENV")
 
-
-
     # Temporarily enable nullglob
     local nullglob_was=0
     if ! shopt -q nullglob; then
         shopt -s nullglob
         nullglob_was=1
     fi
-
-
 
     if shopt -q login_shell; then
         [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
@@ -840,15 +836,10 @@ _ca_sourcedtree() {
             [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
         fi  
     fi 
-    
-    
-    
+  
         # Restore nullglob if we changed it
     (( nullglob_was == 1 )) && shopt -u nullglob
-    
-    
-    
-    
+              
     for file in "${files[@]}"; do
         _ca_sourcedtree_single "$file" "$depth" "$max_depth"
     done
@@ -1406,20 +1397,13 @@ _ca_sourced_files() {
     __CA_SOURCED_FILES_LIST=()
     __CA_SOURCED_SCANNED=0
 
-
-
-
     # Temporarily enable nullglob
     local nullglob_was=0
     if ! shopt -q nullglob; then
         shopt -s nullglob
         nullglob_was=1
     fi
-    
-    
-    
-    
-    
+
     #-------------------------------------------------------
     # Phase 1: Non-interactive
     if [[ -n "$BASH_ENV" && -f "$BASH_ENV" ]]; then
@@ -1458,17 +1442,8 @@ _ca_sourced_files() {
         [[ -d /etc/profile.d ]] && roots+=( /etc/profile.d/*.sh )
     fi 
 
-
-
-
-
-
     # Restore nullglob if we changed it
     (( nullglob_was == 1 )) && shopt -u nullglob
-
-
-
-
 
     #-------------------------------------------------------
     # Static discovery pass
@@ -1918,10 +1893,20 @@ _ca_print_trace() {
     local -a res state rc
     local winner=""
     local found_path=""
-    local alias_def="" file line canonical interp ctype
+    local alias_def="" file line canonical interp ctype 
     local shadowed_file=0
     state=""
+    
+    ctype=$(type -t -- "$cmd" 2>/dev/null)
+    
+    if [[ -z "$ctype" ]]; then
+        printf "├─ ${RED}Unknown or invalid command: ${CYAN}%s${RESET}\n" "$cmd"
+        printf "    ↳ Check your spelling and try again\n\n"  
+        return 1
+    fi
+  
     _ca_resolve_command "$cmd" res
+  
     printf "├─ Command Resolution Trace of ${CYAN}%s${RESET}\n" "$cmd"
     printf "    ⎟ \n"
     # 1. Alias
@@ -2388,18 +2373,12 @@ _ca_walk_bash_startup() {
     __CA_SOURCED_FILES_LIST=()
     __CA_SOURCED_SCANNED=0
 
-
-
-
     # Temporarily enable nullglob
     local nullglob_was=0
     if ! shopt -q nullglob; then
         shopt -s nullglob
         nullglob_was=1
     fi
-
-
-
 
     #-------------------------------------------------------
     # Phase 1: Non-interactive
@@ -2440,12 +2419,8 @@ _ca_walk_bash_startup() {
         fi 
     fi
     
-    
-    
         # Restore nullglob if we changed it
     (( nullglob_was == 1 )) && shopt -u nullglob
-    
-    
     
     #-------------------------------------------------------
     # Static discovery pass
