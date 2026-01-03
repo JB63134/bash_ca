@@ -1,5 +1,8 @@
 # `bash_ca` Changelog
 
+## V2.0.1
+- command guard added to trace no more tracing directories in path.
+
 ## V2.0.0
 - Major refactor  
 - UI/UX improvements 
