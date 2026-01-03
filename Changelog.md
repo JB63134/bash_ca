@@ -1,5 +1,10 @@
 # `bash_ca` Changelog
 
+## V2.0.15
+- UI/UX improvements 
+- -u mode fixed, no more directories in listing.
+- -a mode fixed, now points to correct locations reliably.
+
 ## V2.0.1
 - command guard added to trace no more tracing directories in path.
 

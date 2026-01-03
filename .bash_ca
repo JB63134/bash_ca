@@ -9,7 +9,7 @@
 # Copyright (c) 2025 John Blair
 # Licensed under the MIT License. See LICENSE file for details.        
 #-----------------------------------------------------------------------------------------------
-__CA_version="2.0.1"
+__CA_version="2.0.15"
 # shellcheck disable=SC2034
 __CA_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
 # shellcheck disable=SC2034
@@ -1755,31 +1755,37 @@ _ca_show_hash() {
 # Purpose : Identify user writable commands/scripts/binaries
 #-----------------------------------------------------------
 _ca_list_user_bin() {
+    local found=0
+    local IFS=:
+    local -A seen
+    local fn clickable_text
+    
+    _ca_restore_path   
+    
+    printf "├─ Examining User-Writable Commands:\n"
+        
+    for dir in $PATH; do
+        [[ -d $dir ]] || continue
 
-    printf "├─ Examining User-Writable Commands: \n"
-    _ca_restore_path
+        # Exclude system dirs explicitly
+        case "$dir" in
+            /bin|/usr/bin|/usr/sbin|/sbin) continue ;;
+        esac
 
-    local found=0  # flag to track if anything is printed
-
-    for dir in ${PATH//:/ }; do
-        [ -d "$dir" ] || continue
-        [[ "$dir" =~ ^/usr|^/bin ]] && continue
+        shopt -s nullglob
         for f in "$dir"/*; do
-            [ -x "$f" ] || continue
-            local fn
+            [[ -f $f && -x $f && -w $f ]] || continue
+            [[ -n ${seen[$f]} ]] && continue
+            seen[$f]=1
             fn=$(basename "$f")
-            local clickable_text
             clickable_text=$(printf "${CYAN}(%s)${RESET}" "$f")
-            printf "     %-25s  -- Defined in: \e]8;;file://%s\a%s\e]8;;\a\n" "$fn" "$f" "$clickable_text"
+            printf "     %-25s  -- Defined in: \e]8;;file://%s\a%s\e]8;;\a\n" "$fn" "$f" "$clickable_text"         
             found=1
         done
+        shopt -u nullglob
     done
 
-    if [ $found -eq 0 ]; then
-        printf "    %s\n\n" "No user-writable scripts or binaries found."
-    fi
-
-
+    (( found )) || printf "    No user-writable executables found.\n\n"
 }
 
 # ----------------------------------------------------------------------
@@ -1828,58 +1834,43 @@ _ca_print_fn() {
             "$file" "$line")
             
     # Print clickable link
-    printf "     %-30s  -- Defined in: \e]8;;file://%s\a%s\e]8;;\a\n" "$fn" "$file" "$clickable_text"
+    printf "     %-30s  -- Found in: \e]8;;file://%s\a%s\e]8;;\a\n" "$fn" "$file" "$clickable_text"
 }
                 
 # ----------------------------------------------------------------------
 # Function: _ca_aliases
 # Builds a clickable list of shell aliases with file links
 # ----------------------------------------------------------------------
-_ca_aliases() {       
-printf "├─ Examining Shell Aliases: \n"                        
+_ca_aliases() {
+    printf "├─ Examining Shell Aliases:\n"
 
-    local nullglob_was=0
-
-    # Ensure sourced files list exists
     _ca_ensure_sourcedtree
     [[ -z "${__CA_SOURCED_FILES_LIST[*]}" ]] && return
 
-    #----------------------------
-    # Enable nullglob temporarily 
-    if shopt -q nullglob; then
-        nullglob_was=1
-    else
-        shopt -s nullglob
-    fi
+    local nullglob_was=0
+    shopt -q nullglob || { shopt -s nullglob; nullglob_was=1; }
 
-    # Iterate over all aliases
     for alias_name in $(compgen -A alias); do
-        local file line_number found=0
+        local file line_number last_file last_line
 
-        # Search for the first file defining this alias
+        # Escape alias name for regex
+        local alias_re
+        alias_re=$(printf '%s\n' "$alias_name" | sed 's/[][\\/.*^$+?{}|()]/\\&/g')
+
+        # Walk files in load order; keep LAST match
         for file in "${__CA_SOURCED_FILES_LIST[@]}"; do
-            [[ -r "$file" ]] || continue
-            line_number=$(grep -nE "^[[:space:]]*alias[[:space:]]+${alias_name}[[:space:]]*=" "$file" | head -n1 | cut -d: -f1)
-            if [[ -n "$line_number" ]]; then
-                found=1
-                break
-            fi
+            [[ -r $file ]] || continue
+            line_number=$(grep -nE "^[[:space:]]*alias[[:space:]]+${alias_re}[[:space:]]*=" "$file" | tail -n1 | cut -d: -f1)
+            [[ -n $line_number ]] && { last_file=$file; last_line=$line_number; }
         done
 
-        # Skip if not found
-        [[ $found -eq 0 ]] && continue
+        [[ -z $last_file ]] && continue
 
-        # Build clickable line
-        local clickable_text
-        clickable_text=$(printf "${CYAN}(%s : line %s)${RESET}" \
-            "$file" "$line_number")
-
-        # Print entire line as clickable link
-        printf "     %-10s  -- Defined in:\e]8;;file://%s\a%s\e]8;;\a\n" "$alias_name" "$file" "$clickable_text"
+        printf "     %-10s  -- Found in: %s\e]8;;file://%s\a%s : line %s\e]8;;\a%s\n" "$alias_name" "$CYAN" "$last_file" "$last_file" "$last_line" "$RESET"
+            
     done
 
-    (( !nullglob_was )) && shopt -u nullglob     # Restore nullglob state if we enabled it
-    #----------------------------
+    (( nullglob_was )) && shopt -u nullglob
 }
 
 #------------------------------------------------------------------------
@@ -2209,7 +2200,7 @@ _ca_bash_option_diff() {
                 state="DISABLED"
                 color="$RED"
             fi
-            printf "    %s%-8s%s %s (%s → %s)\n" \
+            printf "    %s%-8s%s %-25s (%s → %s)\n" \
                  "$color" "$state" "$RESET" "$key" "$default_val" "$current_val"
         fi
     done < "$tmp_default"
@@ -2321,7 +2312,7 @@ _ca_list_env() {
     width=$((width - 4))
     [[ $width -le 0 ]] && width=76
 
-    printf "├─ Examining Enviroment Variables: \n\n"                        
+    printf "├─ Examining Enviroment Variables: \n"                        
 
     # Read variables
     eval "$cmd" | while IFS='=' read -r name value; do
