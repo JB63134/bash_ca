@@ -1,5 +1,5 @@
 
-# ca – Bash Command Autopsy
+# ca – Bash Command Analyzer
 
 ---
 
