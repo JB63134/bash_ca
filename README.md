@@ -7,9 +7,9 @@
 [![Version](https://img.shields.io/badge/version-2.0.15-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
-`ca` is an interactive Bash command analyzer that explains **what a command really is**, **where it comes from**, and **why Bash resolves it the way it does**.
+`ca` is an interactive Bash command analyzer that explains **what a command really is** and **where it comes from**.
 
-It inspects aliases, functions, builtins, keywords, scripts, and binaries, then traces how commands expand and resolve in your shell. The goal is to make Bash behavior transparent, especially in heavily customized environments.
+It inspects aliases, functions, builtins, keywords, scripts, and binaries.
 
 Think of it as `type`, `which`, `help`, `file`, `ldd`, `stat`, and half your shell configuration, available through a single command.
 
@@ -22,7 +22,6 @@ Package Lookup: supports dpkg, rpm, and pacman
 
 ### Command Resolution
 - Detects whether a command is an **alias, function, builtin, keyword, or external binary**
-- Traces command resolution order and `$PATH` precedence
 - Automatically analyzes your **most recent command** if none is specified
 
 ### Alias, Function, and Builtin Inspection
@@ -71,7 +70,6 @@ Package Lookup: supports dpkg, rpm, and pacman
 | -------------------- | ---------------------------------------------------------- |
 | `-h`, `--help`       | Show help text                                             |
 | `--version`          | Show version information                                   |
-| `-t`, `--trace`      | Show command resolution order mapping                      |
 | `-o`, `--overridden` | List overridden commands                                   |
 | `-a`, `--alias`      | List all aliases                                           |
 | `-f`, `--function`   | List user-defined functions                                |
