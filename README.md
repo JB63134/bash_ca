@@ -77,7 +77,6 @@ Package Lookup: supports dpkg, rpm, and pacman
 | `-d`, `--diff`       | Show shell options changed from defaults                   |
 | `-e`, `--env`        | List all system variables (printenv / env)                 |
 | `-s`, `--sourced`    | List sourced shell files                                   |
-| `-l`,`--listvar`     | List all variables loaded by sourced files                 |
 | `-p`, `--path`       | Inspect `$PATH` and highlight writable directories         |
 | `-u`, `--user`       | List USER-writable commands                                |
 | `-S`, `--scan`       | Scan for SUID/SGID binaries and world-writable directories |
