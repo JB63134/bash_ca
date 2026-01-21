@@ -4,7 +4,7 @@
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.0.15-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-2.1.0-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
 `ca` is an interactive Bash command analyzer that explains **what a command really is** and **where it comes from**.
@@ -148,7 +148,6 @@ ca [command]
 ```bash
 ca ls
 ca -v sed
-ca -t awk
 ca -r bash
 ```
 ---
@@ -156,7 +155,6 @@ ca -r bash
 ## Screenshots / Output Preview
 
 ![Binary](images/awk.png)
-![Traec](images/trace.png)
 ![package](images/package.png)
 ![af](images/af.png)
 ![Source and $Path modes](images/source-path.png)
