@@ -548,18 +548,14 @@ _ca_usage() {
          -h, --help             Show this help text
              --version          Show version information
 
-       Core analysis:
-         -t, --trace            Command resolution order mapping
-         -o, --overridden       List commands that override others
-
        Environment inspection:
+         -o, --overridden       List commands that override others
          -a, --alias            List all aliases in the environment
          -f, --function         List all USER functions in the environment
          -F, --functionv        Verbose: list ALL functions in the environment
          -d, --diff             List shell options changed from defaults
          -e, --env              List all environment variables (env / printenv)
          -s, --sourced          List all sourced files in the environment
-         -l, --listvar          List variables loaded by sourced files
          -p, --path             List directories in $PATH (highlight writable)
 
        Security / filesystem:
@@ -576,7 +572,6 @@ _ca_usage() {
     Examples:
            ca                   # Automatically analyzes your most recent command
            ca awk               # Analyzes 'awk'
-           ca -t awk            # Which awk runs and why that one?   
            ca -v sed            # Verify package integrity
            ca -r which          # Full report
 EOF
