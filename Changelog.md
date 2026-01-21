@@ -2,6 +2,7 @@
 
 ## V2.1.0
 - command resolution trace removed and released as a standalone script.
+- -l mode removed, wasn't happy with it.
 - minor ui/ux
  
 ## V2.0.15
