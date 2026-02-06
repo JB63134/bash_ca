@@ -8,7 +8,7 @@
 # Copyright (c) 2025 John Blair
 # Licensed under the MIT License. See LICENSE file for details.        
 #-----------------------------------------------------------------------------------------------
-__CA_version="2.1.0"
+__CA_version="2.1.5"
 # shellcheck disable=SC2034
 __CA_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
 # shellcheck disable=SC2034
@@ -62,7 +62,7 @@ ca() {
     case "$cmd" in
         -h|--help) _ca_usage; return 0;;
         --version) _ca_ver; return 0;;
-        -o|--overridden) _ca_overridden; return 0;;   
+        -o|--overridden) _ca_conflicts; return 0;;   
         -a|--alias) _ca_aliases; return 0;;  
         -f|--function) _ca_function; return 0;;
         -F|--functionv) verbose=1; _ca_function; return 0;;    
@@ -1089,156 +1089,89 @@ _ca_check_dependencies() {
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_overridden                         
-# Purpose : list all commands that override another command
+# Function: _ca_conflicts                     
+# Purpose : list all commands that conflict with other command names
 #------------------------------------------------------------------------
-_ca_overridden() {
-    printf "├─ Examining Overridden Commands:\n" 
-    _ca_alias_override
-
-    _ca_function_override
-  
-    _ca_builtin_override
+_ca_conflicts() {
+    printf "├─ Examining Conflicting Command Names:\n" 
+    _ca_keyword_conflicts
+    _ca_alias_conflicts
+    _ca_function_conflicts
+    _ca_builtin_conflicts
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_alias_override                         
-# Purpose : list all aliases that override a command
+# Function: _ca_keyword_conflicts
+# Purpose : list all shell keywords that conflict with other command names
 #------------------------------------------------------------------------
-_ca_alias_override() { 
-    local acmd list akind
-    local flag=0
-    
+_ca_keyword_conflicts() {
+    local kw kinds
+
+    # List shell keywords
+    while IFS= read -r kw; do
+        # Get all resolutions except the keyword itself
+        mapfile -t kinds < <(type -at "$kw" | grep -v '^keyword$')
+
+        if ((${#kinds[@]} > 0)); then
+            printf "  ↳ Keyword: ${CYAN}%-11s${RESET} Conflicts with one or more commands.\n" "$kw"
+        fi
+    done < <(compgen -k)
+    printf "  ⎟ \n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_alias_conflicts
+# Purpose : list all aliases that conflict with other command names
+#------------------------------------------------------------------------
+_ca_alias_conflicts() {
+    local acmd kinds 
+
     while IFS= read -r acmd; do
-        mapfile -t list < <(type -at "$acmd")
+        # Get all resolutions except the alias itself
+        mapfile -t kinds < <(type -at "$acmd" | grep -v '^alias$')
 
-        # Deduplicate results
-        declare -A seen=()
-        local uniq=()
-        for akind in "${list[@]}"; do
-            [[ ${seen[$akind]} ]] && continue
-            uniq+=("$akind")
-            seen[$akind]=1
-        done
-
-        for akind in "${uniq[@]}"; do
-            case "$akind" in
-                builtin)
-                    printf "    ↳ Alias   -  ${CYAN}%-10s${RESET} overrides a builtin of the same name.\n" "$acmd"
-                    flag=1 ;;
-                file)
-                    printf "    ↳ Alias  -  ${CYAN}%-10s${RESET} overrides one or more external commands of the same name.\n" "$acmd"
-                    flag=1 ;;
-            esac
-        done
+        if ((${#kinds[@]} > 0)); then
+            printf "  ↳ Alias: ${CYAN}%-13s${RESET} Conflicts with one or more commands.\n" "$acmd"
+        fi
     done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
-
-    if (( flag == 0 )); then
-        printf "    ↳ %sNo command or builtin is overridden.%s\n" "$CYAN" "$RESET"
-    fi
+    printf "  ⎟ \n"
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_function_override                         
-# Purpose : list all functions that override a command
+# Function: _ca_function_conflicts
+# Purpose : list all shell functions that conflict with other command names
 #------------------------------------------------------------------------
-_ca_function_override() { 
-    local funcmd kind kinds 
-    local func_flag=0
-    declare -A seen_funcs=()          # deduplicate function names
-    declare -A seen_funcs_kinds=()    # deduplicate function/kind combinations
+_ca_function_conflicts() {
+    local fname kinds
 
-    printf "    ⎟   \n"
-    
-    # Get list of function names
-    while read -r funcmd; do
-        # Skip if already processed
-        [[ ${seen_funcs[$funcmd]} ]] && continue
-        seen_funcs[$funcmd]=1
+    # List function names only
+    while IFS= read -r fname; do
+        # Get all resolutions except the function itself
+        mapfile -t kinds < <(type -at "$fname" | grep -v '^function$')
 
-        # Skip names with characters that may break 'type'
-        if [[ ! "$funcmd" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-            continue
+        if ((${#kinds[@]} > 0)); then
+            printf "  ↳ Function: ${CYAN}%-10s${RESET} Conflicts with one or more commands.\n" "$fname"
         fi
-
-        mapfile -t kinds < <(type -at "$funcmd")
-
-        for kind in "${kinds[@]}"; do
-            key="$funcmd-$kind"
-            [[ ${seen_funcs_kinds[$key]} ]] && continue
-            seen_funcs_kinds[$key]=1
-
-            case "$kind" in
-                alias)
-                    printf "    ↳ Function - ${CYAN}%-10s${RESET} overrides an alias of the same name.\n" "$funcmd"
-                    func_flag=1
-                    ;;
-                keyword)
-                    printf "    ↳ Function - ${CYAN}%-10s${RESET} conflicts with a keyword of the same name (keyword takes precedence).\n" "$funcmd"
-                    func_flag=1
-                    ;;
-                builtin)
-                    printf "    ↳ Function - ${CYAN}%-10s${RESET} overrides a builtin of the same name.\n" "$funcmd"
-                    func_flag=1
-                    ;;
-                file)
-                    printf "    ↳ Function - ${CYAN}%-10s${RESET} overrides one or more external commands of the same name.\n" "$funcmd"
-                    func_flag=1
-                    ;;
-            esac
-        done
     done < <(declare -F | awk '{print $3}')
-
-    if [[ $func_flag -eq 0 ]]; then
-        printf "    ↳ No command or builtin is overridden.\n"
-    fi
+    printf "  ⎟ \n"
 }
 
 #------------------------------------------------------------------------
-# Function: _ca_builtin_override
-# Purpose : list builtins that are disabled and note if external commands replace them
+# Function: _ca_builtin_conflicts
+# Purpose : list all builtins that conflict with other command names
 #------------------------------------------------------------------------
-_ca_builtin_override() {
+_ca_builtin_conflicts() {
+    local bcmd kinds
 
-    printf "    ⎟   \n"
-    local b disabled=()
+    # List builtin names
+    while IFS= read -r bcmd; do
+        # Get all resolutions except the builtin itself
+        mapfile -t kinds < <(type -at "$bcmd" | grep -v '^builtin$')
 
-    # Collect disabled builtins
-    while read -r b; do
-        disabled+=("${b#enable -n }")
-    done < <(enable -a | grep '^enable -n ')
-
-    if (( ${#disabled[@]} == 0 )); then
-        printf "    ↳ No builtins are disabled.\n"
-        return
-    fi
-
-    local name
-    for name in "${disabled[@]}"; do
-        printf "    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$name"
-
-        # 1. Alias replacement?
-        if alias "$name" &>/dev/null; then
-            adef=$(alias "$name")
-            printf "       • Alias ${YELLOW}%s -- %s${RESET} now replaces the builtin.\n" "$name" "$adef"
-            continue
+        if ((${#kinds[@]} > 0)); then
+            printf "  ↳ Builtin: ${CYAN}%-11s${RESET} Conflicts with one or more commands.\n" "$bcmd"
         fi
-
-        # 2. Function replacement?
-        if declare -F "$name" &>/dev/null; then
-            printf "       • Function ${YELLOW}%s${RESET} now replaces the builtin.\n" "$name"
-            continue
-        fi
-
-        # 3. External command replacement?
-        if command -v "$name" &>/dev/null; then
-            local newpath
-            newpath=$(command -v "$name")
-            printf "       • External command ${YELLOW}%s - %s${RESET} now replaces the builtin.\n" "$name" "$newpath"
-        else
-            printf "       • No alias, function, or command replaces ${CYAN}%s${RESET}.\n" "$name"
-        fi
-    done
+    done < <(compgen -b)
 }
 
 #------------------------------------------------------------------------
