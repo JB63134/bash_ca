@@ -4,7 +4,7 @@
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.1.0-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-2.1.5-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
 `ca` is an interactive Bash command analyzer that explains **what a command really is** and **where it comes from**.
@@ -70,12 +70,11 @@ Package Lookup: supports dpkg, rpm, and pacman
 | -------------------- | ---------------------------------------------------------- |
 | `-h`, `--help`       | Show help text                                             |
 | `--version`          | Show version information                                   |
-| `-o`, `--overridden` | List overridden commands                                   |
+| `-o`, `--overridden` | List conflicting command names                             |
 | `-a`, `--alias`      | List all aliases                                           |
 | `-f`, `--function`   | List user-defined functions                                |
 | `-F`, `--functionv`  | List all functions (verbose)                               |
 | `-d`, `--diff`       | Show shell options changed from defaults                   |
-| `-e`, `--env`        | List all system variables (printenv / env)                 |
 | `-s`, `--sourced`    | List sourced shell files                                   |
 | `-p`, `--path`       | Inspect `$PATH` and highlight writable directories         |
 | `-u`, `--user`       | List USER-writable commands                                |
