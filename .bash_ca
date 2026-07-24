@@ -8,7 +8,8 @@
 # Copyright (c) 2025 John Blair
 # Licensed under the MIT License. See LICENSE file for details.        
 #-----------------------------------------------------------------------------------------------
-__CA_version="2.1.5"
+__CA_version="2.1.10"
+
 # shellcheck disable=SC2034
 __CA_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
 # shellcheck disable=SC2034
@@ -61,8 +62,7 @@ ca() {
     # -------------------------------------------------------------------------
     case "$cmd" in
         -h|--help) _ca_usage; return 0;;
-        --version) _ca_ver; return 0;;
-        -o|--overridden) _ca_conflicts; return 0;;   
+        --version) _ca_ver; return 0;; 
         -a|--alias) _ca_aliases; return 0;;  
         -f|--function) _ca_function; return 0;;
         -F|--functionv) verbose=1; _ca_function; return 0;;    
@@ -549,7 +549,6 @@ _ca_usage() {
              --version          Show version information
 
        Environment inspection:
-         -o, --overridden       List commands that override others
          -a, --alias            List all aliases in the environment
          -f, --function         List all USER functions in the environment
          -F, --functionv        Verbose: list ALL functions in the environment
@@ -1086,92 +1085,6 @@ _ca_check_dependencies() {
     fi
 
     return 0
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_conflicts                     
-# Purpose : list all commands that conflict with other command names
-#------------------------------------------------------------------------
-_ca_conflicts() {
-    printf "├─ Examining Conflicting Command Names:\n" 
-    _ca_keyword_conflicts
-    _ca_alias_conflicts
-    _ca_function_conflicts
-    _ca_builtin_conflicts
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_keyword_conflicts
-# Purpose : list all shell keywords that conflict with other command names
-#------------------------------------------------------------------------
-_ca_keyword_conflicts() {
-    local kw kinds
-
-    # List shell keywords
-    while IFS= read -r kw; do
-        # Get all resolutions except the keyword itself
-        mapfile -t kinds < <(type -at "$kw" | grep -v '^keyword$')
-
-        if ((${#kinds[@]} > 0)); then
-            printf "  ↳ Keyword: ${CYAN}%-11s${RESET} Conflicts with one or more commands.\n" "$kw"
-        fi
-    done < <(compgen -k)
-    printf "  ⎟ \n"
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_alias_conflicts
-# Purpose : list all aliases that conflict with other command names
-#------------------------------------------------------------------------
-_ca_alias_conflicts() {
-    local acmd kinds 
-
-    while IFS= read -r acmd; do
-        # Get all resolutions except the alias itself
-        mapfile -t kinds < <(type -at "$acmd" | grep -v '^alias$')
-
-        if ((${#kinds[@]} > 0)); then
-            printf "  ↳ Alias: ${CYAN}%-13s${RESET} Conflicts with one or more commands.\n" "$acmd"
-        fi
-    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
-    printf "  ⎟ \n"
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_function_conflicts
-# Purpose : list all shell functions that conflict with other command names
-#------------------------------------------------------------------------
-_ca_function_conflicts() {
-    local fname kinds
-
-    # List function names only
-    while IFS= read -r fname; do
-        # Get all resolutions except the function itself
-        mapfile -t kinds < <(type -at "$fname" | grep -v '^function$')
-
-        if ((${#kinds[@]} > 0)); then
-            printf "  ↳ Function: ${CYAN}%-10s${RESET} Conflicts with one or more commands.\n" "$fname"
-        fi
-    done < <(declare -F | awk '{print $3}')
-    printf "  ⎟ \n"
-}
-
-#------------------------------------------------------------------------
-# Function: _ca_builtin_conflicts
-# Purpose : list all builtins that conflict with other command names
-#------------------------------------------------------------------------
-_ca_builtin_conflicts() {
-    local bcmd kinds
-
-    # List builtin names
-    while IFS= read -r bcmd; do
-        # Get all resolutions except the builtin itself
-        mapfile -t kinds < <(type -at "$bcmd" | grep -v '^builtin$')
-
-        if ((${#kinds[@]} > 0)); then
-            printf "  ↳ Builtin: ${CYAN}%-11s${RESET} Conflicts with one or more commands.\n" "$bcmd"
-        fi
-    done < <(compgen -b)
 }
 
 #------------------------------------------------------------------------
