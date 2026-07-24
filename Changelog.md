@@ -1,5 +1,8 @@
 # `bash_ca` Changelog
 
+## V2.1.10 
+- removed deprecated -o flag.  -o now lives in bash_ct as ct -c or --conflict.
+
 ## V2.1.5
 - -o mode rewritten and expanded
 - -e mode removed
@@ -8,7 +11,7 @@
 - command resolution trace removed and released as a standalone script.
 - -l mode removed, wasn't happy with it.
 - minor ui/ux
- 
+
 ## V2.0.15
 - UI/UX improvements 
 - -u mode fixed, no more directories in listing.
