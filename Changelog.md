@@ -5,7 +5,6 @@
 
 ## V2.1.5
 - -o mode rewritten and expanded
-- -e mode removed
 
 ## V2.1.0
 - command resolution trace removed and released as a standalone script.
