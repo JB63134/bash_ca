@@ -4,7 +4,7 @@
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.1.5-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-2.1.10-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
 `ca` is an interactive Bash command analyzer that explains **what a command really is** and **where it comes from**.
@@ -70,7 +70,6 @@ Package Lookup: supports dpkg, rpm, and pacman
 | -------------------- | ---------------------------------------------------------- |
 | `-h`, `--help`       | Show help text                                             |
 | `--version`          | Show version information                                   |
-| `-o`, `--overridden` | List conflicting command names                             |
 | `-a`, `--alias`      | List all aliases                                           |
 | `-f`, `--function`   | List user-defined functions                                |
 | `-F`, `--functionv`  | List all functions (verbose)                               |
@@ -156,7 +155,6 @@ ca -r bash
 ![package](images/package.png)
 ![af](images/af.png)
 ![Source and $Path modes](images/source-path.png)
-![Overridden commands](images/override.png)
 ![Builtins and Keywords](images/builtin-keyword.png)
 ![Aliases](images/alias.png)
 ![egrep](images/egrep.png)
