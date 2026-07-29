@@ -20,10 +20,6 @@ Package Lookup: supports dpkg, rpm, and pacman
 
 ## Features
 
-### Command Resolution
-- Detects whether a command is an **alias, function, builtin, keyword, or external binary**
-- Automatically analyzes your **most recent command** if none is specified
-
 ### Alias, Function, and Builtin Inspection
 - Displays alias expansions and where they are defined
 - Locates function definitions with file and line numbers
