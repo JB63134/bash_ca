@@ -8,7 +8,7 @@
 # Copyright (c) 2025 John Blair
 # Licensed under the MIT License. See LICENSE file for details.        
 #-----------------------------------------------------------------------------------------------
-__CA_version="2.1.10"
+__CA_version="2.1.15"  # usage fixed
 
 # shellcheck disable=SC2034
 __CA_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
@@ -88,10 +88,10 @@ ca() {
         --fzf) _ca_fzf_search; return 0;; #alias caf='command -v fzf >/dev/null 2>&1 && ca --fzf || ca' 
     esac
     
-    if [[ "$cmd" == "ca" ]]; then 
-        _ca_usage
-        return 0
-    fi
+ #   if [[ "$cmd" == "ca" ]]; then 
+ #       _ca_usage
+ #       return 0
+ #   fi
    
     printf "├─ Examining: ${CYAN}%s${RESET}\n" "$cmd"
    
@@ -569,7 +569,6 @@ _ca_usage() {
              --fzf              Use fzf for interactive searching
    
     Examples:
-           ca                   # Automatically analyzes your most recent command
            ca awk               # Analyzes 'awk'
            ca -v sed            # Verify package integrity
            ca -r which          # Full report
@@ -697,7 +696,7 @@ _ca_fzf_search() {
 
 #------------------------------------------------------------------------
 # Function: _ca_add_admin_paths
-# Purpose: Add ~/.local/bin paths safely and temporarily
+# Purpose: Add admin paths safely and temporarily
 #------------------------------------------------------------------------
 _ca_add_admin_paths() {
     # Save PATH if not already saved 
@@ -1421,6 +1420,8 @@ _ca_verify_binary() {
     status="${GREEN}Command is CLEAN${RESET}"
     bash_hit=0
     
+    _ca_add_admin_paths
+    
     # guard against trash commands
     ctype=$(type -t -- "$cmd" 2>/dev/null)
     if [[ -z "$ctype" ]]; then
@@ -1428,7 +1429,7 @@ _ca_verify_binary() {
         printf "    ↳ Check your spelling and try again\n\n" 
         return 1
     fi
-
+    
     # Compute SHA using _ca_show_hash
     sha=$(_ca_show_hash "$cmd" 2>/dev/null)
 
@@ -1532,6 +1533,9 @@ _ca_verify_binary() {
         printf "    ├─ SHA256: ${CYAN}%s${RESET}\n" "$sha"                
         printf "    └─ Status: %s\n" "$status"   
     fi
+    
+    _ca_restore_path
+    
 }
 
 #------------------------------------------------------------------------
