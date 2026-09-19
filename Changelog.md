@@ -1,5 +1,9 @@
 # `bash_ca` Changelog
 
+## V2.1.15
+- edited usage message
+- fixed bug in path extension, in some cases path was not being extended as needed. 
+
 ## V2.1.10 
 - removed deprecated -o flag.  -o now lives in bash_ct as ct -c or --conflict.
 
