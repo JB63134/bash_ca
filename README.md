@@ -4,7 +4,7 @@
 ---
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.1.10-blue)](https://github.com/JB63134/bash_ca/releases) 
+[![Version](https://img.shields.io/badge/version-2.1.15-blue)](https://github.com/JB63134/bash_ca/releases) 
 
 
 `ca` is an interactive Bash command analyzer that explains **what a command really is** and **where it comes from**.
