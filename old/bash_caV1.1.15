@@ -1,0 +1,2846 @@
+#!/usr/bin/env bash
+#------------------------------------------------------------------------
+# ca  aka .bash_ca           ┌──────┐ │      │ └──────┘
+# Main Function: ca                                                                         
+# Purpose: Analyzes a Bash command, alias, builtin, keyword,  function, or binary
+#------------------------------------------------------------------------
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+
+# shellcheck disable=SC2034
+ca_needed_deps=(grep basename file find bc sed cut head readlink realpath awk ldd getcap perl)
+# shellcheck disable=SC2034
+ca_optional_deps=(tput fzf batcat bat dpkg rpm pacman)
+
+OLD_PATH="$PATH"
+
+declare -g CA_INDENT=""
+declare -g CA_MAX_DEPTH=8
+declare -g __CA_SOURCED_SCANNED=0
+declare -gA __CA_SOURCED_FILES_MAP=()    
+declare -ga __CA_SOURCED_FILES_LIST=()  
+declare -gA __CA_SEEN_ALIASES
+declare -gA __CA_SEEN_COMMANDS
+declare -gA __CA_SEEN_BUILTINS
+declare -gA __CA_SHADOW_SEEN
+declare -gA __CA_VISITED          
+complete -F _ca_completion ca
+
+ca() {
+    # -------------------------
+    # LOCAL Variables
+    # -------------------------
+    local fcmd cmd ctype cmd_path alias_expansion RED GREEN CYAN RESET 
+    local depth=${2:-0}
+    local cmdline="$*"
+    
+    depth=${2:-0}                # default to 0 if not provided
+    
+    if ! [[ "$depth" =~ ^[0-9]+$ ]]; then
+        depth=0
+    fi
+    
+    CA_INDENT=$(printf "%*s" $((depth * 4)) "")
+    
+    # -------------------------
+    # Colors (tput → ANSI → none)
+    # -------------------------
+    if command -v tput &>/dev/null && [[ $(tput colors 2>/dev/null) -ge 8 ]]; then
+        # Preferred: tput colors
+        RED=$(tput setaf 1)
+        GREEN=$(tput setaf 2)
+        CYAN=$(tput setaf 6)
+        YELLOW=$(tput setaf 11)
+        BPURP=$(tput setaf 13)
+        GREY=$(tput setaf 245)     # proper neutral gray
+        RESET=$(tput sgr0)
+        UNLINE=$(tput smul)
+        STOPUNLINE=$(tput rmul)
+    else
+        # Fallback: ANSI escape sequences
+        RED='\033[31m'
+        GREEN='\033[32m'
+        CYAN='\033[36m'
+        YELLOW='\033[93m'
+        BPURP='\033[95m'
+        GREY='\033[90m'  # safe gray
+        RESET='\033[0m'
+        UNLINE='\033[4m'
+        STOPUNLINE='\033[0m'
+    fi
+ 
+    : "${RED:=}"
+    : "${GREEN:=}"
+    : "${CYAN:=}"
+    : "${YELLOW:=}"
+    : "${BPURP:=}"
+    : "${GREY:=}"
+    : "${RESET:=}"
+    : "${UNLINE:=}"
+    : "${STOPUNLINE:=}"
+ 
+    # -------------------------
+    # Set first run variables path etc... keep from running every recursive loop 
+    # set new path, clean arrays, and greet user once
+    # -------------------------
+    if (( depth == 0 )); then
+        trap '_ca_restore_path' RETURN
+        _ca_add_admin_paths
+
+        #--------------------------
+        # Reset arrays on first run
+        #--------------------------
+        __CA_SOURCED_SCANNED=0
+        __CA_SEEN_ALIASES=()
+        __CA_SEEN_COMMANDS=()
+        __CA_SEEN_BUILTINS=()
+        __CA_SHADOW_SEEN=()
+        __CA_VISITED=()
+
+        #--------------------------
+        # Greeting
+        #--------------------------
+        printf "\n╔══════════════════════════════════════════════╗\n"
+        printf "║  ca – Bash Command Autopsy                   ║\n"
+        printf "╚══════════════════════════════════════════════╝\n"
+        
+        # -------------------------
+        # Check dependencies
+        _ca_check_dependencies ca_needed_deps ca_optional_deps 1  || return 1 # 1 = exit if required deps missing
+    fi 
+    
+    # -------------------------
+    # Depth guard
+    # -------------------------
+    (( depth > CA_MAX_DEPTH )) && { 
+        printf "%s${RED}Max recursion depth (%d) reached${RESET}\n" "$CA_INDENT" "$CA_MAX_DEPTH"
+        return 1 
+    }
+    
+    # -------------------------
+    # Get command or last command
+    # -------------------------
+    if [[ -n "$1" ]]; then
+        read -r -a fcmd <<< "$1"
+    else
+        read -r -a fcmd <<< "$(fc -ln -1)" || { 
+            printf "%s    ↳ ${RED}Failed to get last command${RESET}\n" "$CA_INDENT"
+            return 1
+        }
+    fi
+    cmd="${fcmd[0]}"
+    
+    # -------------------------------------------------------------------------
+    # handle arguments for ca
+    # -------------------------------------------------------------------------
+    
+    local fzffound=0
+    local verbose=0
+    local pick
+    if command -v fzf &>/dev/null; then
+        fzffound=1
+    fi
+    
+    case "$cmd" in
+        -h|--help) _ca_usage; return 0;;
+        -v|--version) _ca_ver; return 0;;
+        -a|--aliases) printf "\n"; _ca_aliases; return 0;;  
+        -f|--functions) printf "\n"; _ca_function; return 0;;
+        -fv|--funverb) verbose=1; printf "\n"; _ca_function; return 0;;    
+        -F|--forensic)
+            printf "\n"
+            shift
+            _ca_print_trace "$1" &&
+            _ca_verify_package "$1"    
+            return 0
+            ;;              
+        -d|--diff) printf "\n"; _ca_bash_option_diff; return 0;;   
+        -l|--listenv)
+            shift
+            _ca_list_env "$*"
+            return 0
+            ;;
+        -o|--overridden) printf "\n"; _ca_overridden; return 0;;   
+        -p|--path) printf "\n"; _ca_writable_dir_in_path; return 0;;   
+        -s|--sourced) printf "\n"; _ca_sourced_files; return 0;;
+        -S|--scan) printf "\n"; _ca_display_files_scan; return 0;;
+        -t|--trace) shift; cmd="$1"; _ca_print_trace "$cmd"; return 0;;
+        -u|--user) printf "\n"; _ca_list_user_bin; return 0;;
+        -V|--verify) printf "\n"; shift; cmd="$1"; _ca_verify_package "$cmd"; return 0;;
+        -var)
+            printf "\n"
+            _ca_sourced_files &&
+            printf "\n"
+            _ca_apply_startup_with_env_tracking
+            printf "\n"
+            return 0
+           ;;
+        --fzf)
+            if (( fzffound == 1 )); then 
+                local pick
+                pick=$(compgen -A function -A alias -A builtin -A command | sort -u | fzf --prompt="Get help for: ")
+                [[ -n "$pick" ]] || return 1
+                ca "$pick" 1
+                return 0
+            else
+                printf "%s    ↳ ${YELLOW}fzf is not installed.${RESET}\n" "$CA_INDENT"
+                printf "\n"
+                _ca_usage;
+                return 0
+            fi  
+            ;;  
+    esac
+    
+    # -------------------------------------------------------------------------
+    # Handle ca for now, prevent ca from analyzing itself because 
+    # it will spam the screen with itself
+    # -------------------------------------------------------------------------
+    if [[ "$cmd" == "ca" ]]; then
+            printf "%s├─ Do you speak spanish?\n" "$CA_INDENT"
+            printf "%s├─ Detected ${CYAN}'%s' ${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Showing  ${CYAN}'%s --help'${RESET}:\n\n"  "$CA_INDENT" "$cmd"
+            _ca_usage
+            return 0
+    fi
+    
+    # -------------------------------------------------------------------------
+    # Handle Edge case that fails with type. catch it here to avoid a crash later.
+    # ------------------------------------------------------------------------- 
+    if [[ "$cmd" == "]" ]]; then
+        printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+        printf "%s          ${CYAN}%s${RESET} -- Ends a conditional test expression.\n" "$CA_INDENT" "$cmd"
+        return 0
+    fi
+    
+    # ------------------------------------------------------------------------- 
+    # Handle command operators
+    # -------------------------------------------------------------------------        
+    local cmd1="${YELLOW}command1${RESET}"
+    local cmd2="${GREEN}command2${RESET}"
+
+    case "$cmd" in
+        "&&")
+            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Logical AND: %s ${CYAN}'%s'${RESET} %s\n" "$CA_INDENT" "$cmd1" "$cmd" "$cmd2"
+            printf "%s          Runs %s only if %s succeeds (exit status 0).\n\n" "$CA_INDENT" "$cmd2" "$cmd1"
+            return 0
+            ;;
+        "||")
+            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Logical OR: %s ${CYAN}'%s'${RESET} %s\n" "$CA_INDENT" "$cmd1" "$cmd" "$cmd2"
+            printf "%s          Runs %s only if %s fails (non-zero exit status).\n\n" "$CA_INDENT" "$cmd2" "$cmd1"
+            return 0            
+            ;;
+        "&")
+            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET} (background)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Runs %s in the background.\n\n" "$CA_INDENT" "$cmd1"
+            return 0            
+            ;;
+        "|")
+            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Sends stdout of %s to stdin of %s.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
+            return 0 
+            ;;
+        "|&")
+            printf "%s├─ Detected the BASH pipe operator ${CYAN}'%s'${RESET} (stderr+stdout)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Sends both stdout and stderr of %s to stdin of %s.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
+            return 0 
+            ;;
+        ";")
+            printf "%s├─ Detected the BASH operator ${CYAN}'%s'${RESET} (sequence)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Run %s, then run %s regardless of success/failure.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
+            return 0 
+            ;;
+        "<")
+            printf "%s├─ Detected input redirection ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Reads input of %s from %s instead of stdin.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
+            return 0 
+            ;;
+        ">")
+            printf "%s├─ Detected output redirection ${CYAN}'%s'${RESET} (overwrite)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Redirects stdout of %s to %s (overwrite file).\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
+            return 0 
+            ;;
+        ">>")
+            printf "%s├─ Detected output redirection ${CYAN}'%s'${RESET} (append)\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Redirects stdout of %s to %s (append to file).\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
+            return 0 
+            ;;
+        "2>")
+            printf "%s├─ Detected stderr redirection ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Redirects stderr of %s to %s.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
+            return 0 
+            ;;
+        "&>")
+            printf "%s├─ Detected stdout+stderr redirection ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Redirects both stdout and stderr of %s to %s.\n\n" "$CA_INDENT" "$cmd1" "$cmd2"
+            return 0 
+            ;;
+        "<<<")
+            printf "%s├─ Detected here-string ${CYAN}'%s'${RESET}\n" "$CA_INDENT" "$cmd"
+            printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+            printf "%s          Passes a string directly as stdin to %s.\n\n" "$CA_INDENT" "$cmd2"
+            return 0 
+            ;;
+    esac
+    
+    # -------------------------------------------------------------------------
+    # Split and analyze pipelines, chains, and lists safely
+    # -------------------------------------------------------------------------
+    if [[ "$cmdline" =~ [\|\&\;] ]]; then
+        local segments=()
+        _ca_split_top_level_commands "$cmdline" segments
+
+        for seg in "${segments[@]}"; do
+            # Get individual commands in the segment (e.g., within a pipeline)
+            local subcmds=()
+            _ca_parse_commands "$seg" subcmds
+
+            for c in "${subcmds[@]}"; do
+                printf "%s${CYAN}↳ Subcommand:${RESET} %s\n" "$CA_INDENT" "$c"
+                ca "$c" $((depth + 1))
+            done
+        done
+        return 0
+    fi
+
+    # -------------------------------------------------------------------------
+    # Detect command type
+    # -------------------------------------------------------------------------
+    ctype=$(type -t -- "$cmd" 2>/dev/null)
+    if [[ -z "$ctype" ]]; then
+        printf "%s├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Check your spelling and try again\n\n" "$CA_INDENT" 
+        return 1
+    fi
+
+    # -------------------------------------------------------------------------
+    # Handle keywords and provide help statements
+    # -------------------------------------------------------------------------
+declare -A __CA_KEYWORD_DESC=(
+    [then]="Part of an if statement - Begins the command block for a true condition." 
+    [else]="Part of an if statement - Begins the command block if the condition is false." 
+    [elif]="Part of an if statement - Introduces a new condition if the previous one is false." 
+    [fi]="Ends an if statement."
+    [do]="Begins the body of a loop or conditional block."
+    [done]="Ends the body of a loop or conditional block." 
+    [in]="Specifies the list to iterate over in a loop." 
+    [!]="Negates the exit status of a command or pipeline." 
+    [esac]="Ends a case statement."
+    ["}"]="Ends a command block."
+    ["]]"]="Ends a conditional test expression."
+)
+
+if [[ $ctype == "keyword" ]]; then
+    printf "%s├─ Detected BASH Keyword ${CYAN}'%s' ${RESET}\n" "$CA_INDENT" "$cmd"
+
+    if help "$cmd" &>/dev/null; then
+        printf "%s    ↳ Showing  ${CYAN}'help %s'${RESET}:\n\n" "$CA_INDENT" "$cmd"
+        help "$cmd" 2>/dev/null | sed 's/^/    /'
+    elif [[ -n "${__CA_KEYWORD_DESC[$cmd]}" ]]; then
+        printf "%s    ↳ ${CYAN}%s${RESET} has no help file\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Definition:\n\n" "$CA_INDENT"
+        printf "%s          ${CYAN}%s${RESET} -- %s\n" "$CA_INDENT" "$cmd" "${__CA_KEYWORD_DESC[$cmd]}"
+    fi
+    return 0
+fi
+    
+    # -------------------------------------------------------------------------
+    # Builtins
+    # -------------------------------------------------------------------------
+    if [[ "$ctype" == "builtin" ]]; then
+        printf "%s├─ ${CYAN}'%s'${RESET} is a shell builtin\n" "$CA_INDENT" "$cmd"
+
+        # Enabled/disabled
+        local enabled_state="enabled"
+        if enable -p 2>/dev/null | grep -qE "^-n ${cmd}\b"; then
+            enabled_state="disabled"
+        fi
+        printf "%s    ↳ Status: Shell builtin is ${CYAN}%s${RESET}\n" "$CA_INDENT" "$enabled_state"
+
+        # Loadable builtins
+        local origin="Core Bash builtin"
+        while read -r loaded; do
+            # format: enable -f PATH NAME
+            builtin_name="${loaded##* }"
+            if [[ "$builtin_name" == "$cmd" ]]; then
+                origin="Loadable builtin ($loaded)"
+                break
+            fi
+        done < <(enable -a | grep '^enable -f ' || true)
+
+        printf "%s    ↳ Source:  ${CYAN}%s${RESET}\n" "$CA_INDENT" "$origin"
+
+        # Show help
+        printf "%s    ↳ Showing ${CYAN}'help %s'${RESET}:\n\n" "$CA_INDENT" "$cmd"
+        help "$cmd" 2>/dev/null | sed "s/^/$CA_INDENT        /"
+
+        # Recurse
+        local nextcmd=("${fcmd[@]:1}")
+        if (( ${#nextcmd[@]} > 0 )); then
+            ca "${nextcmd[*]}" $((depth + 1))
+        fi
+        return 0
+    fi
+        
+    # -------------------------------------------------------------------------
+    # Functions
+    # -------------------------------------------------------------------------
+    if [[ "$ctype" == "function" ]]; then
+
+        #--------------------------- 
+        # Enable extdebug temporarily so declare -F includes file/line info
+        local was_extdebug=0
+
+        if shopt -q extdebug; then
+            was_extdebug=1
+        else
+            shopt -s extdebug
+        fi
+        
+        read -r _ line file <<< "$(declare -F "$cmd")"
+
+        (( !was_extdebug )) && shopt -u extdebug  # Restore extdebug state if we enabled it
+        #---------------------------- 
+        
+        printf "%s├─ ${CYAN}'%q' ${RESET}is a shell function\n" "$CA_INDENT" "$cmd"
+        
+
+ found_location=$(printf "\e]8;;file://%s\a%s\e]8;;\a" "$file" "$file")
+        
+        
+        if [[ "$file" == "main" ]]; then
+            printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$CA_INDENT"
+        else
+            printf "%s    ↳ Declared in: ${CYAN}%s (line %s)${RESET}\n" "$CA_INDENT" "$found_location" "$line"
+        fi
+        
+        # Compute SHA using _ca_show_hash
+        sha=$(_ca_show_hash "$cmd" 2>/dev/null)      
+        printf "%s    ↳ SHA256: %s%s%s\n" "$CA_INDENT" "${CYAN}" "$sha" "${RESET}"
+
+        printf "%s    ↳ Showing preview of function: ${CYAN}%s${RESET}\n\n"  "$CA_INDENT" "$cmd"     
+           
+        local func_content
+        func_content=$(declare -f "$cmd")
+        _ca_highlight_script "$func_content" "$CA_INDENT" "$file" "$line"
+        
+        printf "\n%s    ======= End of function preview =======\n" "$CA_INDENT"   
+        return 0
+    fi
+    
+    # -------------------------------------------------------------------------
+    # Aliases
+    # -------------------------------------------------------------------------
+    if [[ "$ctype" == "alias" ]]; then
+        # Avoid re-analyzing the same alias (prevents infinite loops)
+        [[ -n "${__CA_SEEN_ALIASES[$cmd]}" ]] && return 0
+        __CA_SEEN_ALIASES["$cmd"]=1
+    
+        # Get the alias expansion (strip surrounding quotes)
+        local raw
+        raw=$(alias "$cmd")
+        quote=${raw#*=}         # remove 'name='
+        quote="${quote:0:1}"      # first character → "'"
+       result="${raw#*"${quote}"}"  # removes everything up to first quote → "ls -alF'"
+       result="${result%"${quote}"}"        # removes trailing "'" → "ls -alF"
+        alias_expansion=$(_ca_expand_vars "$result")
+        alias_def=$(alias "$cmd")
+        
+        printf "%s├─ ${CYAN}'%s' ${RESET}is an alias:\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Resolves to: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$alias_def"
+    
+        # Show where alias is defined
+        local found_location=""
+        local line_number
+        
+        _ca_ensure_sourcedtree
+        
+        #-----------------------------------------------------
+        # Enable nullglob temporarily 
+        local nullglob_was=0
+        if shopt -q nullglob; then
+            nullglob_was=1
+        else
+            shopt -s nullglob
+        fi
+           
+        for file in "${__CA_SOURCED_FILES_LIST[@]}"; do 
+             [[ -r "$file" ]] || continue
+             if grep -qE "^[[:space:]]*alias[[:space:]]+${cmd}=" "$file"; then
+ found_location=$(printf "\e]8;;file://%s\a%s\e]8;;\a" "$file" "$file")
+                line_number=$(grep -nE "^[[:space:]]*alias[[:space:]]+$cmd=" "$file" | head -n1 | cut -d: -f1)
+                printf "%s    ↳ Defined in: ${CYAN}%s (line %s)${RESET}\n" "$CA_INDENT" "$found_location" "$line_number"
+             fi
+        done
+        (( !nullglob_was )) && shopt -u nullglob  # Restore nullglob state if we enabled it
+        #-----------------------------------------------------
+        
+        if [[ -z "$found_location" ]]; then
+            printf "%s    ↳ Declared in: ${CYAN}interactive shell (not from a file)${RESET}\n" "$CA_INDENT"
+        fi     
+
+        # Compute SHA using _ca_show_hash
+        sha=$(_ca_show_hash "$cmd" 2>/dev/null)      
+        printf "%s    ↳ SHA256: %s%s%s\n" "$CA_INDENT" "${CYAN}" "$sha" "${RESET}"
+        
+        #"SHA256: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$sha"
+        # Handle alias expansion with chain/pipeline parsing
+        if [[ "$alias_expansion" =~ [\|\&\;] ]]; then
+            local segments=()
+            _ca_split_top_level_commands "$alias_expansion" segments
+
+            for seg in "${segments[@]}"; do
+                local subcmds=()
+                _ca_parse_commands "$seg" subcmds
+
+                for c in "${subcmds[@]}"; do
+                    printf "%s${BPURP}    ↳ Alias subcommand:${RESET} %s\n" "$CA_INDENT" "$c"
+                    ca "$c" $((depth + 1))
+                done
+            done
+            return 0
+        else
+            # No chain/pipeline — analyze normally
+            # Resolve only the first token of the alias expansion to avoid arbitrary shells
+            read -r -a alias_tokens <<< "$alias_expansion"
+            local primary="${alias_tokens[0]}"
+            # If primary is a function, recurse; otherwise analyze as external or builtin
+            if declare -F "$primary" &>/dev/null; then
+                if [[ -z "${__CA_VISITED[$primary]}" ]]; then
+                    __CA_VISITED["$primary"]=1
+                    ca "$primary" $((depth + 1))
+                else
+                    printf "%s    ↳ ${CYAN}%s${RESET} already visited — possible cycle\n" "$CA_INDENT" "$primary"
+                fi
+            else
+                ca "$alias_expansion" $((depth + 1))
+            fi
+            return 0
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
+    # External commands
+    # -------------------------------------------------------------------------
+    if [[ "$ctype" == "file" ]]; then
+        cmd_path=$(command -v "$cmd") 
+
+        local cmd_real formatted_type file_info
+        cmd_real=$(readlink -f "$cmd_path" 2>/dev/null || echo "$cmd_path")
+        file_info=$(file -b "$cmd_real")
+
+        formatted_type=$(printf "%s" "$file_info" | sed -E \
+            $'s/, interpreter/\\\ninterpreter/g; 
+              s/, version/\\\nversion/g; 
+              s/, dynamically/\\\ndynamically/g; 
+              s/, BuildID/\\\nBuildID/g; 
+              s/, for /\\\nfor /g')
+
+        printf "%s├─ ${CYAN}'%s' ${RESET}is an external command\n" "$CA_INDENT" "$cmd"
+        printf "%s    ↳ Path: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$cmd_path"
+
+        # Detect symbolic link
+        if [[ "$cmd_real" != "$cmd_path" ]]; then
+            printf "%s    ↳ ${YELLOW}Symbolic link ${RESET}to: ${YELLOW}%s${RESET}\n" "$CA_INDENT" "$cmd_real"
+            cmd_path="$cmd_real"
+            printf "%s    ↳ Now Examining: ${BPURP}%s${RESET}\n" "$CA_INDENT" "$cmd_real"
+        fi
+        
+        local base
+        base=$(basename "$cmd_real")
+        _ca_show_path_alternates "$base" "$cmd_real"
+        
+        local size_bytes
+        size_bytes=$(stat -c %s "$cmd_path")
+        printf "%s    ↳ File Size: " "$CA_INDENT" 
+
+        local kib=1024
+        local mib=$((1024 * 1024))
+        local gib=$((1024 * 1024 * 1024))
+        local tib=$((1024 * 1024 * 1024 * 1024))
+
+        if   (( size_bytes < kib )); then printf "${CYAN}%d B${RESET}\n" "$size_bytes"
+        elif (( size_bytes < mib )); then printf "${CYAN}%.1f KB${RESET}\n" "$(echo "$size_bytes / 1024" | bc -l)"
+        elif (( size_bytes < gib )); then printf "${CYAN}%.1f MB${RESET}\n" "$(echo "$size_bytes / 1048576" | bc -l)"
+        elif (( size_bytes < tib )); then printf "${CYAN}%.1f GB${RESET}\n" "$(echo "$size_bytes / 1073741824" | bc -l)"
+        else                         printf "${CYAN}%.1f TB${RESET}\n" "$(echo "$size_bytes / 1099511627776" | bc -l)"
+        fi
+        
+        
+        # Compute SHA using _ca_show_hash
+        sha=$(_ca_show_hash "$cmd" 2>/dev/null)      
+        printf "%s    ↳ SHA256: %s%s%s\n" "$CA_INDENT" "${CYAN}" "$sha" "${RESET}"
+        
+        # Root privilege detection
+        local requires_root=0
+        local root_reason=""
+
+        # 1. setuid root
+        if [[ -u "$cmd_path" && $(stat -c '%U' "$cmd_path") == "root" ]]; then
+            requires_root=1
+            root_reason="setuid root binary"
+
+        # 2. capabilities from getcap
+        elif command -v getcap &>/dev/null; then
+            local caps
+            caps=$(getcap "$cmd_path" 2>/dev/null)
+            if [[ "$caps" =~ (cap_sys_admin|cap_dac_override|cap_net_admin) ]]; then
+                requires_root=1
+                root_reason="binary grants elevated capabilities (getcap)"
+            fi
+        fi
+
+        # 3. known admin commands
+        if (( !requires_root )); then
+            local root_cmds=(
+                mount umount reboot shutdown halt ifconfig iptables ip
+                systemctl journalctl modprobe insmod rmmod fdisk mkfs losetup
+                parted fsck useradd userdel passwd chown chmod service sysctl
+                visudo fstrim swapoff swapon update-grub grub-install blkid
+                update-initramfs
+            )
+            for rcmd in "${root_cmds[@]}"; do
+                if [[ "$cmd" == "$rcmd" ]]; then
+                    requires_root=1
+                    root_reason="known administrative command"
+                    break
+                fi
+            done
+        fi
+        
+        if (( requires_root )); then
+            printf "%s    ↳ Requires root privileges: ${YELLOW}%s${RESET}\n" "$CA_INDENT" "$root_reason"
+        fi
+        
+        # Executable Type
+        if grep -qiE 'script|text executable' <<< "$file_info"; then
+            printf "%s    ↳ Executable Type: ${CYAN}Script / Text executable${RESET}\n" "$CA_INDENT"
+            local first_line interp
+            first_line=$(head -n1 "$cmd_path")
+
+            if [[ "$first_line" =~ ^#! ]]; then
+                interp="${first_line#\#!}"
+                interp="${interp#"${interp%%[![:space:]]*}"}"
+            fi
+
+            while IFS= read -r line; do
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$line"
+            done <<< "$formatted_type"
+
+            printf "%s    ↳ Interpreter: ${CYAN}%s${RESET}\n" "$CA_INDENT" "$interp"
+
+        elif grep -qi 'ELF' <<< "$file_info"; then
+            if grep -qi 'statically linked' <<< "$file_info"; then
+                printf "%s    ↳ Executable Type: ELF binary - Statically linked\n" "$CA_INDENT"
+            else
+                printf "%s    ↳ Executable Type: ELF binary - Dynamically linked\n" "$CA_INDENT"
+            fi
+
+            while IFS= read -r line; do
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$line"
+            done <<< "$formatted_type"
+
+        else
+            printf "%s    ↳ Executable Type: Unknown\n" "$CA_INDENT"
+            while IFS= read -r line; do
+                printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$line"
+            done <<< "$formatted_type"
+            printf "%s    ⎟       ${YELLOW}%s${RESET}\n" "$CA_INDENT" "$file_info"
+        fi
+
+        # Dependencies (ELF only)
+        local deps=""
+        
+        if grep -qi ELF <<< "$file_info"; then
+            deps=$(ldd "$cmd_path" 2>/dev/null | sed 's/^[[:space:]]*//')
+        fi
+        
+        if [[ -n "$deps" ]]; then
+            printf "%s    ↳ Dependencies:\n" "$CA_INDENT"
+            local unmet_found=0
+            while IFS= read -r line; do
+                if [[ "$line" =~ "not found" ]]; then
+                    unmet_found=1
+                    printf "%s    ⎟    ${RED}%s${RESET}\n" "$CA_INDENT" "$line"
+                else
+                    printf "%s    ⎟    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$line"
+                fi
+            done <<< "$deps"
+            (( unmet_found )) && printf "%s        ↳ ${RED}Some dependencies are missing!${RESET}\n" "$CA_INDENT"
+        fi
+
+# Package info
+_ca_lookup_package "$cmd_path" "$CA_INDENT"
+        
+        # Permissions
+        if [[ -x "$cmd_path" ]]; then
+            local perms octal owner_grp owner_perm group_perm other_perm risk_color
+            local sid=""
+            perms=$(stat -c "%A" "$cmd_path")
+            octal=$(stat -c "%a" "$cmd_path")
+            owner_grp=$(stat -c "%U:%G" "$cmd_path")
+
+            owner_perm="${perms:1:3}"
+            group_perm="${perms:4:3}"
+            other_perm="${perms:7:3}"
+
+            # Determine risk level
+            if [[ ${owner_perm:2:1} =~ [sS] ]]; then
+                risk_color="${YELLOW}"      # SUID → high risk
+                sid="[SUID]"
+            elif [[ ${group_perm:2:1} =~ [sS] ]]; then
+                risk_color="${YELLOW}"   # SGID → medium risk
+                sid="[SGID]"
+            elif [[ ${other_perm} =~ w ]]; then
+                risk_color="${RED}"      # world write → very risky
+                sid="[World Writable]"  
+            else
+                risk_color="${CYAN}"    # normal → safe
+            fi
+
+            # Highlight the s or S in yellow
+            if [[ ${owner_perm:2:1} =~ [sS] ]]; then
+                owner_perm="${owner_perm:0:2}${YELLOW}${owner_perm:2:1}${RESET}"
+            fi
+
+            if [[ ${group_perm:2:1} =~ [sS] ]]; then
+                group_perm="${group_perm:0:2}${YELLOW}${group_perm:2:1}${RESET}"
+            fi
+
+            # Output
+            printf "%s    ↳ Permissions: %s%s%s (octal: %s%s%s)  %s%s%s\n" \
+                "$CA_INDENT" "$risk_color" "$perms" "$RESET" \
+                "$risk_color" "$octal" "$RESET" "$risk_color" "$sid" "$RESET"
+
+            printf "%s    ⎟    ↳ Owner/Group: ${CYAN}%s${RESET}\n" \
+                "$CA_INDENT" "$owner_grp"
+
+            printf "%s    ⎟    ↳ Owner: ${CYAN}%s${RESET}  Group: ${CYAN}%s${RESET}  Others: ${CYAN}%s${RESET}\n" \
+                "$CA_INDENT" "$owner_perm" "$group_perm" "$other_perm"
+        fi
+       
+        local crtime ctime mtime atime
+        
+        crtime=$(stat -c %w -- "$cmd_path"); [[ "$crtime" == "-" ]] && crtime="(not available)"
+        ctime=$(stat -c %z -- "$cmd_path")
+        mtime=$(stat -c %y -- "$cmd_path")
+        atime=$(stat -c %x -- "$cmd_path")
+        
+        printf "%s    ↳ Timestamps:\n" "$CA_INDENT"
+        printf "%s    ⎟    ↳ File created (crtime): ${CYAN}%s${RESET}\n" "$CA_INDENT" "$crtime"
+        printf "%s    ⎟    ↳ Last status change (ctime): ${CYAN}%s${RESET}\n" "$CA_INDENT" "$ctime" 
+        printf "%s    ⎟    ↳ Last modified (mtime): ${CYAN}%s${RESET}\n" "$CA_INDENT" "$mtime"   
+        printf "%s    ⎟    ↳ Last accessed (atime): ${CYAN}%s${RESET}\n" "$CA_INDENT" "$atime"         
+
+        local perlfound=0
+        if command -v perl &>/dev/null; then
+            perlfound=1
+        fi
+    
+
+     found_location=$(printf "\e]8;;file://%s\a%s\e]8;;\a" "$cmd_path" "$cmd_path")
+     
+        # Dump script content
+        if grep -qiE 'script|text executable' <<< "$file_info"; then
+            printf "%s    ↳ Showing preview of script ${CYAN}'%s'${RESET}: %s\n" "$CA_INDENT" "$found_location"
+            if (( perlfound == 0 )); then 
+                printf "%s    ↳ ${YELLOW}Optional dependency 'perl' missing — syntax highlighting reduced${RESET}\n" "$CA_INDENT" 
+            fi           
+            if [[ -r "$cmd_path" ]]; then
+                printf "\n"
+                _ca_highlight_script "$cmd_path" "$CA_INDENT" " " " "
+                printf "\n%s    ========== End of script preview ========= \n" "$CA_INDENT"
+            fi
+            return 0
+        else
+            printf "%s    └──────────────────────────────────────────\n\n" "$CA_INDENT"
+        fi
+        local next_cmd=("${fcmd[@]:1}")
+        if (( ${#next_cmd[@]} > 0 )); then
+            ca "${next_cmd[*]}" $((depth + 1))
+        fi
+        return 0
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_usage
+# Purpose : Display usage information and examples for the `h` command analyzer.
+#------------------------------------------------------------------------
+_ca_usage() {
+    cat <<'EOF'
+
+     Usage:  ca [command]  
+     Analyze aliases, builtins, keywords, functions, scripts or binaries.
+
+     Options:
+           -h --help or h       Show this help text.
+           -v --version         Show version information.
+           -a --aliases 	list all aliases in the enviroment
+           -f --functions	List all USER functions in the enviroment
+           -fv --funverb	Verbose - list ALL functions in the enviroment
+           --fzf                Use fzf to interactivly search for commands  
+           -F --full	        Full report - flags -t and -V
+           -d --diff	        list shell options that have changed from default in the enviroment
+           -l --listenv 	List all system variables (printenv / env)
+           --var	        List all variables loaded by sourced files 
+           -o --overridden      List commands that override others
+           -p --path            List all directories in $PATH and highlight writable directories.
+           -s --sourced         List all sourced files in the enviroment.
+           -S --scan            Scan for SUID/SGID binaries and world-writable directories
+           -t --trace	        Command resolution order mapping
+           -u --user	        List USER writable commands
+           -V --verify          Verify package integrity (supports dpkg, rpm and pacman)
+             
+     Examples:
+           ca                   # Automatically analyzes your most recent command
+           ca awk               # Analyzes 'awk'
+           ca -t awk            # Which awk runs and why that one?
+           
+EOF
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_ver
+# Purpose : Display version information.
+#------------------------------------------------------------------------
+_ca_ver() {
+    cat <<'EOF'
+
+     ca v1.1.15 — Bash Command Analyzer
+     Author : John Blair
+          
+     MIT License
+
+     Copyright (c) 2025 John Blair
+
+     Permission is hereby granted, free of charge, to any person obtaining a copy
+     of this software and associated documentation files (the "Software"), to deal
+     in the Software without restriction, including without limitation the rights
+     to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+     copies of the Software, and to permit persons to whom the Software is
+     furnished to do so, subject to the following conditions:
+
+     The above copyright notice and this permission notice shall be included in all
+     copies or substantial portions of the Software.
+
+     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+     AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+     SOFTWARE.
+
+EOF
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_add_admin_paths
+# Purpose: Add ~/.local/bin paths safely and temporarily
+#------------------------------------------------------------------------
+_ca_add_admin_paths() {
+    # Save PATH if not already saved 
+    if [[ -z "$OLD_PATH" ]]; then
+        OLD_PATH="$PATH"
+    fi
+
+    local admin_dirs=(
+        "$HOME/bin"
+        "$HOME/bin/scripts"
+        "$HOME/.local/bin"
+        "$HOME/.cargo/bin"
+        "$HOME/.npm-global/bin"
+        "$HOME/.local/share/bash-completion/bin"
+        "$CONDA_PREFIX/bin"
+        "/flatpak/bin"
+        "/snap/bin"
+        "/usr/local/bin"
+        "/usr/local/sbin"
+        "/usr/local/games"
+        "/usr/bin"
+        "/usr/sbin"
+        "/usr/games"
+        "/bin"
+        "/sbin"
+        "/opt/bin"
+        "/opt/sbin"
+    )
+        
+    for dir in "${admin_dirs[@]}"; do
+        [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]] && PATH="$dir:$PATH"
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_restore_path
+# Automatically restore PATH when leaving scope
+#------------------------------------------------------------------------
+_ca_restore_path() {
+    if [[ -n "$OLD_PATH" ]]; then
+        PATH="$OLD_PATH"
+        unset OLD_PATH
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_completion
+# Purpose : Enable tab completion for entering commands 
+#------------------------------------------------------------------------
+_ca_completion() {
+    local cur="${COMP_WORDS[COMP_CWORD]}"
+    local commands
+    
+    trap '_ca_restore_path' RETURN
+    _ca_add_admin_paths
+    
+    # Collect possible completions: aliases, functions, builtins, and executables in PATH
+    mapfile -t commands < <(compgen -A function -A alias -A builtin -A command -- "$cur")
+    # Provide them to bash-completion
+    COMPREPLY=("${commands[@]}")
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_expand_vars
+# Purpose : expand variables for aliases so $HOME resolves to /home/jb/ 
+#------------------------------------------------------------------------
+_ca_expand_vars() {
+    local input="$1"
+    # Only expand variables like $HOME, $USER, etc. Use 'printf' with parameter expansion to avoid arbitrary command execution.
+    # Use a small whitelist: HOME, USER, PWD, SHELL
+    local out="$input"
+    [[ -n "$HOME" ]] && out="${out//\$HOME/$HOME}"
+    [[ -n "$USER" ]] && out="${out//\$USER/$USER}"
+    [[ -n "$PWD" ]] && out="${out//\$PWD/$PWD}"
+    [[ -n "$SHELL" ]] && out="${out//\$SHELL/$SHELL}"
+    printf '%s' "$out"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_sourcedtree
+# Purpose: Recursively scan .bashrc for ALL files that are sourced. including conditionals.
+#------------------------------------------------------------------------
+_ca_sourcedtree() {
+    local file files depth max_depth
+    depth=0
+    max_depth="${MAX_DEPTH:-5}"
+    files=("$BASH_ENV")
+
+    if shopt -q login_shell; then
+        [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
+        [[ -f /etc/profile && -r /etc/profile ]] && files+=( /etc/profile )
+        if [[ -f ~/.bash_profile && -r ~/.bash_profile ]]; then 
+            files+=( ~/.bash_profile )
+        elif [[ -f ~/.bash_login && -r ~/.bash_login ]]; then 
+            files+=( ~/.bash_login )
+        elif [[ -f ~/.profile && -r ~/.profile ]]; then 
+            files+=( ~/.profile )
+        fi
+    else
+        # Non-login interactive shell
+        [[ -d /etc/bash.bashrc.d ]] && files+=( /etc/bash.bashrc.d/*.sh )
+        [[ -f ~/.bashrc && -r ~/.bashrc ]] && files+=( ~/.bashrc )
+        [[ -f /etc/bash.bashrc && -r /etc/bash.bashrc ]] && files+=( /etc/bash.bashrc )
+        [[ -f /etc/bashrc && -r /etc/bashrc ]] && files+=( /etc/bashrc )
+    fi
+   
+    if [ -f /etc/os-release ]; then
+        while IFS='=' read -r key value; do
+            # Remove surrounding quotes if present
+            value="${value%\"}"
+            value="${value#\"}"
+            case "$key" in
+                ID)
+                    [[ "$value" == "fedora" || "$value" == "rhel" ]] && is_rhel_like=1
+                    ;;
+                ID_LIKE)
+                    [[ "$value" == *"rhel"* ]] && is_rhel_like=1
+                    ;;
+            esac
+        done < /etc/os-release
+    fi
+    
+    if [[ -n "$is_rhel_like" ]]; then
+        # This system is Fedora/RHEL-like
+        [[ -d /etc/profile.d ]] && files+=( /etc/profile.d/*.sh )
+    fi  
+  
+    for file in "${files[@]}"; do
+        _ca_sourcedtree_single "$file" "$depth" "$max_depth"
+    done
+}
+
+    #-----------------------------------------------------------
+    # Internal recursive function
+_ca_sourcedtree_single() {
+    local file="$1"
+    local depth="${2:-0}"
+    (( depth > CA_MAX_DEPTH )) && return
+
+# Expand path
+local expanded
+expanded=$(_ca_expand_path "$file")
+expanded="${expanded%%$'\n'}"   # strip newlines
+
+# Skip empty, duplicates, or unreadable files
+[[ -z "$expanded" ]] && return
+[[ -n ${__CA_SOURCED_FILES_MAP["$expanded"]} ]] && return
+[[ ! -f "$expanded" || ! -r "$expanded" ]] && return
+
+__CA_SOURCED_FILES_MAP["$expanded"]=1
+__CA_SOURCED_FILES_LIST+=("$expanded")
+
+    local line f left right
+
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+        #   Standard source/dot
+        if [[ $line =~ ^[[:space:]]*(source|\.)[[:space:]]+(.+) ]]; then
+            for f in ${BASH_REMATCH[2]}; do
+                f=$(_ca_expand_path "$f")
+                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$CA_MAX_DEPTH"
+            done
+            continue
+        fi
+
+        #  Conditional: [[ -f FILE ]] && source FILE
+        if [[ $line == *"&&"* ]]; then
+            left=${line%%&&*}
+            right=${line#*&&}
+            # Remove leading/trailing spaces
+            left=${left##*( )}
+            left=${left%%*( )}
+            right=${right##*( )}
+            right=${right%%*( )}
+
+            # Check if left is [[ -f FILE ]] and right is source FILE
+            if [[ $left =~ \[\[[[:space:]]*-f[[:space:]]+([^]]+)\]\] ]] && [[ $right =~ ^source[[:space:]]+(.+) ]]; then
+                f=$(_ca_expand_path "${BASH_REMATCH[1]}")
+                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$CA_MAX_DEPTH"
+            fi
+            continue
+        fi
+
+        #   For loops: for VAR in FILES; do source $VAR; done
+        if [[ $line =~ ^[[:space:]]*for[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+in[[:space:]]+(.+) ]]; then
+            for f in ${BASH_REMATCH[1]}; do
+                f=$(_ca_expand_path "$f")
+                [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$CA_MAX_DEPTH"
+            done
+            continue
+        fi
+
+#  Array sourcing: source "${ARRAY[@]}"  (safe mode, no eval)
+if [[ $line =~ source[[:space:]]+\"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\[@\]\}\" ]]
+then
+    local arr_name="${BASH_REMATCH[1]}"
+    local decl
+
+    # Extract array declaration safely
+    decl=$(declare -p "$arr_name" 2>/dev/null) || return
+
+    # Only allow indexed or associative arrays
+    [[ $decl =~ ^declare\ -[aA] ]] || return
+
+    # Extract elements (still text, not executed)
+    local elems
+    mapfile -t elems < <(
+        sed -n 's/^declare \-[aA][^=]*=(//p' <<<"$decl" |
+        tr -d '()' |
+        tr ' ' '\n'
+    )
+
+    for f in "${elems[@]}"; do
+        # Reject anything remotely executable
+        [[ $f =~ [\$\`\;\&\|] ]] && continue
+
+        f=$(_ca_expand_path "$f")
+        [[ -f "$f" ]] && _ca_sourcedtree_single "$f" $((depth + 1)) "$CA_MAX_DEPTH"
+    done
+fi
+
+    done < "$expanded"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_expand_path
+_ca_expand_path() {
+    local p="$1"
+
+    # Strip quotes, semicolons, leading/trailing spaces
+    p="${p//\"/}"
+    p="${p//\'/}"
+    p="${p//;/}"
+    p="${p##*( )}"
+    p="${p%%*( )}"
+
+    # Tilde expansion
+    [[ "$p" == "~"* ]] && p="${p/#\~/$HOME}"
+
+    # Replace known environment variables
+    [[ -n "$HOME" ]] && p="${p//\$HOME/$HOME}"
+    [[ -n "$BASH_ENV" ]] && p="${p//\$BASH_ENV/$BASH_ENV}"
+
+    # Convert to absolute path if possible
+    if command -v realpath &>/dev/null && [[ -e "$p" ]]; then
+        p=$(realpath "$p" 2>/dev/null || echo "$p")
+    fi
+
+    # Remove newlines and trailing spaces
+    p="${p//$'\n'/}"
+    p="${p%%*( )}"
+    printf '%s' "$p"
+}
+
+    #-----------------------------------------------------------
+    # Helper: _ca_ensure_sourcedtree
+_ca_ensure_sourcedtree() {
+    (( __CA_SOURCED_SCANNED )) && return
+    _ca_sourcedtree
+    __CA_SOURCED_SCANNED=1
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_highlight_script   # _ca_highlight_script "$path-to-script" "<blankspaces>"
+# Purpose: Modular syntax highlighting with CA_INDENTation based on string in $2
+#------------------------------------------------------------------------
+_ca_highlight_script() {
+    local input="$1"
+    local CA_INDENT="    "
+    local file="$3"
+    local line="$4"
+   
+    # Construct header for literal text or file
+    local header=""
+    if [[ -n "$file" && -n "$line" ]]; then
+        if [[ "$file" == "main" ]]; then
+            header="Interactive shell (not from a file)"
+        else    
+        header="$file (line $line)"
+        fi
+    elif [[ -f "$input" ]]; then
+        header="$input"
+    fi
+    
+    # Read file if it exists
+    local code
+    if [[ -f "$input" ]]; then
+        code=$(<"$input")
+    else
+        code="$input"
+    fi
+    
+#----------------------------------------
+# Choose bat or batcat, if available
+local bat_pager=""
+if command -v bat &>/dev/null; then
+    bat_pager="bat"
+elif command -v batcat &>/dev/null; then
+    bat_pager="batcat"
+fi
+
+#----------------------------------------
+# If bat is available, use it
+if [[ -n "$bat_pager" ]]; then
+    if [[ -f "$input" ]]; then
+        "$bat_pager" --color=always --paging=never --line-range :50 --file-name "$input" "$input" \
+        | sed "s/^/$CA_INDENT/"
+    else
+        # Input is literal text → use process substitution
+        printf "%s" "$code" \
+        | "$bat_pager" --color=always --language bash --paging=never --line-range :50 --file-name "$header" - \
+        | sed "s/^/$CA_INDENT/"
+    fi
+    return
+fi
+
+    perl - "$code" "$CA_INDENT" <<'PERL_CODE'
+use strict;
+use warnings;
+
+my $content = $ARGV[0];
+my $CA_INDENT = $ARGV[1] // "";
+
+# ANSI colors
+my %C = (
+    comment   => "\e[36m",
+    string    => "\e[96m",
+    subshell  => "\e[35m",
+    decl      => "\e[32m",
+    control   => "\e[93m",
+    builtin   => "\e[32m",
+    command   => "\e[35m",
+    variable  => "\e[33m",
+    number    => "\e[34m",
+    bracket   => "\e[37m",
+    reset     => "\e[0m",
+);
+
+# Patterns for syntax highlighting
+my @patterns = (
+    { regex => qr/("(?:[^"\\]|\\.)*")/,       color => 'string' },
+    { regex => qr/('(?:[^'\\]|\\.)*')/,       color => 'string' },
+    { regex => qr/\$\((?:[^()]+|(?R))*\)/x,   color => 'subshell' },
+    { regex => qr/`[^`]*`/,                    color => 'subshell' },
+    { regex => qr/\b(local|declare|export|typeset)\b/, color => 'decl' },
+    { regex => qr/\b(if|then|else|elif|fi|for|while|do|done|until|select|case|esac|break|continue)\b/, color => 'control' },
+    { regex => qr/\b(function|return|exit|trap|shift|read|mapfile|set|unset)\b/, color => 'builtin' },
+    { regex => qr/\b(printf|echo|mkdir|find|grep|sed|awk|cut|sort|head|tail|xargs|cat|touch|chmod|chown|curl|wget)\b/, color => 'command' },
+    { regex => qr/\$[A-Za-z0-9_@#*!?_-]+/, color => 'variable' },
+    { regex => qr/\b[0-9]+(\.[0-9]+)?\b|0x[0-9A-Fa-f]+/, color => 'number' },
+    { regex => qr/\[\[|\]\]|\(\(|\)\)|\(|\)|\{|\}/, color => 'bracket' },
+    { regex => qr/#.*/, color => 'comment' },
+);
+
+sub highlight {
+    my ($line, $CA_INDENT) = @_;
+    foreach my $p (@patterns) {
+        $line =~ s/($p->{regex})/$C{$p->{color}}$1$C{reset}/g;
+    }
+    return $CA_INDENT . $line;
+}
+
+for my $line (split /\n/, $content) {
+    print highlight($line, $CA_INDENT), "\n";
+}
+PERL_CODE
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_check_dependencies
+# Purpose : Check core and optional dependencies, optionally exit on missing core deps
+# Usage   : _ca_check_dependencies needed_deps optional_deps [EXIT_ON_MISSING] 0or1
+#------------------------------------------------------------------------
+_ca_check_dependencies() {
+    local -n required="$1"
+    local -n optional="$2"
+    local exit_on_missing="${3:-1}"
+
+    local missing_required=()
+    local missing_optional=()
+
+    for cmd in "${required[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing_required+=("$cmd")
+    done
+
+    for cmd in "${optional[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing_optional+=("$cmd")
+    done
+
+    if (( ${#missing_required[@]} )); then
+        printf "%b\n" "${RED}Warning: Missing REQUIRED tools: ${missing_required[*]}${RESET}"
+        if (( exit_on_missing )); then
+            printf "%b\n" "${RED}Cannot continue analysis without core dependencies.${RESET}"
+            if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+                exit 1
+            else
+                return 1
+            fi
+        fi
+    fi
+
+    return 0
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_overridden                         
+# Purpose : list all commands that override another command
+#------------------------------------------------------------------------
+_ca_overridden() {
+    printf "======== Override Inspection (Mode: -o) ========\n\n"
+    _ca_alias_override
+    printf "\n"  
+    _ca_function_override
+    printf "\n"  
+    _ca_builtin_override
+    printf "\n================ End of list =================== \n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_alias_override                         
+# Purpose : list all aliases that override a command
+#------------------------------------------------------------------------
+_ca_alias_override() { 
+    local acmd list akind
+    local flag=0
+    
+    printf "├─ Examining aliases to detect overridden commands:\n"
+
+    while IFS= read -r acmd; do
+        mapfile -t list < <(type -at "$acmd")
+
+        # Deduplicate results
+        declare -A seen=()
+        local uniq=()
+        for akind in "${list[@]}"; do
+            [[ ${seen[$akind]} ]] && continue
+            uniq+=("$akind")
+            seen[$akind]=1
+        done
+
+        for akind in "${uniq[@]}"; do
+            case "$akind" in
+                builtin)
+                    printf "    ↳ Alias   -  ${YELLOW}%-10s${RESET} overrides a builtin of the same name.\n" "$acmd"
+                    flag=1 ;;
+                file)
+                    printf "    ↳ Alias  -  ${YELLOW}%-10s${RESET} overrides one or more external commands of the same name.\n" "$acmd"
+                    flag=1 ;;
+            esac
+        done
+    done < <(alias | sed -E 's/^alias ([^=]+)=.*/\1/')
+
+    if (( flag == 0 )); then
+        printf "    ↳ %sNo command or builtin is overridden.%s\n" "$CYAN" "$RESET"
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_function_override                         
+# Purpose : list all functions that override a command
+#------------------------------------------------------------------------
+_ca_function_override() { 
+    local funcmd kind kinds 
+    local func_flag=0
+    declare -A seen_funcs=()          # deduplicate function names
+    declare -A seen_funcs_kinds=()    # deduplicate function/kind combinations
+
+    printf "├─ Examining functions to detect overridden commands:\n"
+
+    # Get list of function names
+    while read -r funcmd; do
+        # Skip if already processed
+        [[ ${seen_funcs[$funcmd]} ]] && continue
+        seen_funcs[$funcmd]=1
+
+        # Skip names with characters that may break 'type'
+        if [[ ! "$funcmd" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            continue
+        fi
+
+        mapfile -t kinds < <(type -at "$funcmd")
+
+        for kind in "${kinds[@]}"; do
+            key="$funcmd-$kind"
+            [[ ${seen_funcs_kinds[$key]} ]] && continue
+            seen_funcs_kinds[$key]=1
+
+            case "$kind" in
+                alias)
+                    printf "    \u21b3 Function - ${YELLOW}%-10s${RESET} overrides an alias of the same name.\n" "$funcmd"
+                    func_flag=1
+                    ;;
+                keyword)
+                    printf "    \u21b3 Function - ${YELLOW}%-10s${RESET} conflicts with a keyword of the same name (keyword takes precedence).\n" "$funcmd"
+                    func_flag=1
+                    ;;
+                builtin)
+                    printf "    \u21b3 Function - ${YELLOW}%-10s${RESET} overrides a builtin of the same name.\n" "$funcmd"
+                    func_flag=1
+                    ;;
+                file)
+                    printf "    \u21b3 Function - ${YELLOW}%-10s${RESET} overrides one or more external commands of the same name.\n" "$funcmd"
+                    func_flag=1
+                    ;;
+            esac
+        done
+    done < <(declare -F | awk '{print $3}')
+
+    if [[ $func_flag -eq 0 ]]; then
+        printf "    \u21b3 No command or builtin is overridden.\n"
+    fi
+}
+
+
+#------------------------------------------------------------------------
+# Function: _ca_builtin_override
+# Purpose : list builtins that are disabled and note if external commands replace them
+#------------------------------------------------------------------------
+_ca_builtin_override() {
+    printf "├─ Examining disabled builtins to identify any replacement commands:\n"
+
+    local b disabled=()
+
+    # Collect disabled builtins
+    while read -r b; do
+        disabled+=("${b#enable -n }")
+    done < <(enable -a | grep '^enable -n ')
+
+    if (( ${#disabled[@]} == 0 )); then
+        printf "    ↳ No builtins are disabled.\n"
+        return
+    fi
+
+    local name
+    for name in "${disabled[@]}"; do
+        printf "    ↳ Builtin ${YELLOW}%s${RESET} is DISABLED.\n" "$name"
+
+        # 1. Alias replacement?
+        if alias "$name" &>/dev/null; then
+            adef=$(alias "$name")
+            printf "       • Alias ${YELLOW}'%s' -- '%s'${RESET} now replaces the builtin.\n" "$name" "$adef"
+            continue
+        fi
+
+        # 2. Function replacement?
+        if declare -F "$name" &>/dev/null; then
+            printf "       • Function ${YELLOW}'%s'${RESET} now replaces the builtin.\n" "$name"
+            continue
+        fi
+
+        # 3. External command replacement?
+        if command -v "$name" &>/dev/null; then
+            local newpath
+            newpath=$(command -v "$name")
+            printf "       • External command ${YELLOW}'%s' - '%s'${RESET} now replaces the builtin.\n" "$name" "$newpath"
+        else
+            printf "       • No alias, function, or command replaces ${CYAN}'%s'${RESET}.\n" "$name"
+        fi
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_display_files_scan
+# Purpose : scan for SUID / SGID binaries and World-Writable directories 
+#------------------------------------------------------------------------
+_ca_display_files_scan() {
+    printf "=== SUID/SGID and W-W directories (Mode: -S) ===\n\n"
+    _ca_suid_scan
+    printf "\n"
+    _ca_sgid_scan
+    printf "\n"
+    _ca_find_world_writable_dirs
+    printf "\n================ End of list =================== \n"
+}
+#------------------------------------------------------------------------
+# Function: _ca_sgid_scan
+# Purpose : Scan for SGID binaries
+#------------------------------------------------------------------------
+_ca_sgid_scan() {
+    printf "├─ Scanning for SGID binaries:\n"
+
+    while IFS= read -r hitg; do
+        printf "    ↳ ${YELLOW}%s${RESET}\n" "$hitg"
+    done < <(find / -perm -2000 -type f -exec ls -l {} + 2>/dev/null)
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_suid_scan
+# Purpose : Scan for SUID binaries
+#------------------------------------------------------------------------
+_ca_suid_scan() {
+    printf "├─ Scanning for SUID binaries:\n"
+
+    while IFS= read -r hit; do
+        printf "    ↳ ${YELLOW}%s${RESET}\n" "$hit"
+    done < <(find / -perm -4000 -type f -exec ls -l {} + 2>/dev/null)
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_find_world_writable_dirs
+# Purpose : Scan for world_writable_dirs
+#------------------------------------------------------------------------
+_ca_find_world_writable_dirs() {
+
+    printf "├─ Scanning for World-Writable directories:\n"
+
+    # Find world-writable directories
+    mapfile -t dirs < <(find / -type d -perm -0002 2>/dev/null)
+
+    for dir in "${dirs[@]}"; do
+        [ -d "$dir" ] || continue
+
+        perms=$(stat -c "%A" "$dir")
+        owner_g=$(stat -c "%U:%G" "$dir")
+        note=""
+
+        # Check sticky bit (position 9)
+        sticky="${perms:9:1}"
+
+        if [ "$sticky" = "t" ] || [ "$sticky" = "T" ]; then
+            note="${YELLOW}WORLD-WRITABLE + STICKY${RESET}"
+            printf "    ↳ ${YELLOW}%-40s %-10s %-20s %-25s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+        else
+            note="${RED}WORLD-WRITABLE!${RESET}"
+            printf "    ↳ ${RED}%-40s %-10s %-20s %-25s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+        fi
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_writable_dir_in_path
+# Purpose : Detect writable directories in $PATH
+#------------------------------------------------------------------------
+_ca_writable_dir_in_path() {
+_ca_restore_path
+    printf "========== PATH Inspection (Mode: -p) ==========\n\n"                          
+    printf "├─ Examining PATH directory Order and Permissions:\n"
+    printf "    ↳ %s%-40s %-15s %-20s %-10s%s\n" "$UNLINE" "Directory" "Perms" "Owner:Group" "Note" "$STOPUNLINE"
+    
+    IFS=: read -ra dirs <<< "$PATH"
+    for dir in "${dirs[@]}"; do
+    if [ ! -d "$dir" ]; then
+        # Directory does not exist
+        perms="N/A"
+        owner_g="N/A"
+        note="${BPURP}MISSING${RESET}"
+        printf "    ↳ ${BPURP}%-40s %-15s %-20s ${RESET}%-10s\n" "$dir" "$perms" "$owner_g" "$note"
+        continue
+    fi
+
+    # Directory exists
+    target=$(readlink -f "$dir" 2>/dev/null || echo "$dir")
+    perms=$(stat -c "%A" "$target" 2>/dev/null || echo "N/A")
+    owner_g=$(stat -c "%U:%G" "$target" 2>/dev/null || echo "N/A")
+    note=""
+
+    if [[ "${perms:8:1}" == "w" ]]; then
+        note="${RED}WORLD-WRITABLE${RESET}"
+        printf "    ↳ ${RED}%-40s %-15s %-20s ${RESET}%-10s\n" "$dir" "$perms" "$owner_g" "$note"
+    elif [ -w "$dir" ]; then
+        note="Writable"
+        printf "    ↳ ${YELLOW}%-40s %-15s %-20s %-10s${RESET}\n" "$dir" "$perms" "$owner_g" "$note"
+    else
+        printf "    ↳ %-40s %-15s %-20s %-10s\n" "$dir" "$perms" "$owner_g" "$note"
+    fi
+    done
+    printf "\n================ End of list =================== \n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_split_top_level_commands
+# Purpose : Split a Bash command line into top-level segments
+#------------------------------------------------------------------------
+_ca_split_top_level_commands() {
+    local input="$1"
+    local -n out="$2"
+    out=()
+
+    local len=${#input}
+    local i=0
+    local seg=""
+    local c next
+
+    # parser state
+    local in_single=0 in_double=0 in_backtick=0
+    local paren=0 brace=0 bracket=0
+    local dollar_paren=0
+
+    while (( i < len )); do
+        c="${input:i:1}"
+        next="${input:i+1:1}"
+
+        # -----------------------------
+        # QUOTE HANDLING
+        if (( in_single )); then
+            seg+="$c"
+            [[ $c == "'" ]] && in_single=0
+            ((i++)); continue
+        fi
+        if (( in_double )); then
+            seg+="$c"
+            # handle escaped quotes inside double quotes
+            if [[ $c == '"' ]] && [[ "${input:i-1:1}" != "\\" ]]; then
+                in_double=0
+            fi
+            ((i++)); continue
+        fi
+        if (( in_backtick )); then
+            seg+="$c"
+            [[ $c == '`' ]] && in_backtick=0
+            ((i++)); continue
+        fi
+
+        # Enter quotes
+        case "$c" in
+            "'") in_single=1; seg+="$c"; ((i++)); continue;;
+            '"') in_double=1; seg+="$c"; ((i++)); continue;;
+            '`') in_backtick=1; seg+="$c"; ((i++)); continue;;
+        esac
+
+        # -----------------------------
+        # STRUCTURAL NESTING
+        case "$c" in
+            '(')
+                seg+="$c"
+                ((paren++))
+                # detect $(...)
+                if [[ "${input:i-1:1}" == '$' ]]; then ((dollar_paren++)); fi
+                ((i++)); continue;;
+            ')')
+                seg+="$c"
+                if (( dollar_paren > 0 )); then
+                    ((dollar_paren--))
+                else
+                    ((paren--))
+                fi
+                ((i++)); continue;;
+
+            '{') seg+="$c"; ((brace++)); ((i++)); continue;;
+            '}') seg+="$c"; ((brace--)); ((i++)); continue;;
+            '[') seg+="$c"; ((bracket++)); ((i++)); continue;;
+            ']') seg+="$c"; ((bracket--)); ((i++)); continue;;
+        esac
+
+        # -----------------------------
+        # TOP LEVEL OPERATORS
+        # Only if ALL nesting == 0
+        if (( paren==0 && brace==0 && bracket==0 && !in_single && !in_double && !in_backtick )); then
+
+            # Operators: || && | ; &
+            # Identify multi-char first
+            if [[ "$c$next" =~ ^(\|\||&&|;;|;&)$ ]]; then
+                out+=("$(printf '%s' "$seg" | sed 's/[[:space:]]*$//')")
+                out+=("$c$next")
+                seg=""
+                ((i+=2)); continue
+            fi
+
+            case "$c" in
+                '|'|';'|'&')
+                    out+=("$(printf '%s' "$seg" | sed 's/[[:space:]]*$//')")
+                    out+=("$c")
+                    seg=""
+                    ((i++)); continue;;
+            esac
+        fi
+
+        # default → accumulate
+        seg+="$c"
+        ((i++))
+    done
+
+    # final segment
+    if [[ -n "$seg" ]]; then
+        out+=("$(printf '%s' "$seg" | sed 's/[[:space:]]*$//')")
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_parse_commands
+# Purpose : Parse a Bash segment into actual executed commands using a conservative tokenizer
+#------------------------------------------------------------------------
+_ca_parse_commands() {
+    local cmdline="$1"
+    local -n out_arr="${2:-out_arr}" 2>/dev/null || local -n out_arr="$2"
+    [[ -z "$cmdline" ]] && return
+
+    local segments=()
+    local seg=""
+    local in_single=0 in_double=0
+    local in_backtick=0
+    local paren=0 brace=0 bracket=0
+    local i=0 len=${#cmdline} c next
+
+    # First, split by top-level operators
+    while (( i < len )); do
+        c="${cmdline:i:1}"
+        next="${cmdline:i+1:1}"
+
+        # Handle quotes
+        if (( in_single )); then
+            seg+="$c"
+            [[ $c == "'" ]] && in_single=0
+            ((i++)); continue
+        fi
+        if (( in_double )); then
+            seg+="$c"
+            if [[ $c == '"' && "${cmdline:i-1:1}" != "\\" ]]; then
+                in_double=0
+            fi
+            ((i++)); continue
+        fi
+        if (( in_backtick )); then
+            seg+="$c"
+            [[ $c == '`' ]] && in_backtick=0
+            ((i++)); continue
+        fi
+
+        case "$c" in
+            "'") in_single=1; seg+="$c"; ((i++)); continue;;
+            '"') in_double=1; seg+="$c"; ((i++)); continue;;
+            '`') in_backtick=1; seg+="$c"; ((i++)); continue;;
+            '(') ((paren++)); seg+="$c"; ((i++)); continue;;
+            ')') ((paren--)); seg+="$c"; ((i++)); continue;;
+            '{') ((brace++)); seg+="$c"; ((i++)); continue;;
+            '}') ((brace--)); seg+="$c"; ((i++)); continue;;
+            '[') ((bracket++)); seg+="$c"; ((i++)); continue;;
+            ']') ((bracket--)); seg+="$c"; ((i++)); continue;;
+        esac
+
+        # Top-level operator detection
+        if (( paren==0 && brace==0 && bracket==0 && !in_single && !in_double && !in_backtick )); then
+            if [[ "$c$next" =~ ^(\|\||&&)$ ]]; then
+                [[ -n "$seg" ]] && segments+=("$seg")
+                segments+=("$c$next")
+                seg=""
+                ((i+=2))
+                continue
+            fi
+            case "$c" in
+                '|'|';'|'&')
+                    [[ -n "$seg" ]] && segments+=("$seg")
+                    segments+=("$c")
+                    seg=""
+                    ((i++))
+                    continue;;
+            esac
+        fi
+
+        # default → accumulate
+        seg+="$c"
+        ((i++))
+    done
+    [[ -n "$seg" ]] && segments+=("$seg")
+
+    # Now analyze each segment
+    for s in "${segments[@]}"; do
+        # Operators
+        if [[ "$s" =~ ^(\|\||&&|;|\|)$ ]]; then
+            out_arr+=("$s")
+            continue
+        fi
+
+        # Split segment into command + args respecting quotes (simple)
+        local tokens=()
+        # Use a safe read to split tokens: rely on word-splitting via eval in a subshell but avoid execution
+        # We use printf %q + eval with "set --" to safely split respecting quotes (no expansion)
+        local raw="$s"
+        # remove leading/trailing whitespace
+        raw="${raw#"${raw%%[![:space:]]*}"}"
+        raw="${raw%"${raw##*[![:space:]]}"}"
+        if [[ -z "$raw" ]]; then
+            continue
+        fi
+
+        # attempt a conservative split
+        local token=""
+        local j=0 len_seg=${#raw} ch
+        local in_s=0 in_d=0
+        while (( j < len_seg )); do
+            ch="${raw:j:1}"
+            if (( in_s )); then
+                token+="$ch"
+                [[ $ch == "'" ]] && in_s=0
+                ((j++)); continue
+            fi
+            if (( in_d )); then
+                token+="$ch"
+                if [[ $ch == '"' && "${raw:j-1:1}" != "\\" ]]; then
+                    in_d=0
+                fi
+                ((j++)); continue
+            fi
+
+            case "$ch" in
+                "'") in_s=1; token+="$ch";;
+                '"') in_d=1; token+="$ch";;
+                ' ')
+                    if [[ -n "$token" ]]; then
+                        tokens+=("$token")
+                        token=""
+                    fi
+                    ;;
+                *) token+="$ch";;
+            esac
+            ((j++))
+        done
+        [[ -n "$token" ]] && tokens+=("$token")
+
+        # Analyze first token as command
+        local cmd_name="${tokens[0]}"
+        # normalize: strip surrounding quotes if present
+        if [[ "$cmd_name" =~ ^\".*\"$ || "$cmd_name" =~ ^\'.*\'$ ]]; then
+            cmd_name="${cmd_name:1:${#cmd_name}-2}"
+        fi
+
+        # Skip already seen alias recursion in this parse (avoid infinite)
+        if [[ -n "${__CA_SEEN_ALIASES[$cmd_name]}" ]]; then
+            out_arr+=("$cmd_name")
+            continue
+        fi
+
+        if alias "$cmd_name" &>/dev/null; then
+            __CA_SEEN_ALIASES[$cmd_name]=1
+            out_arr+=("$cmd_name")
+            # we do not expand inline here — return token to caller for further analysis
+        elif declare -f "$cmd_name" &>/dev/null; then
+            __CA_SEEN_ALIASES[$cmd_name]=1
+            out_arr+=("$cmd_name")
+        else
+            out_arr+=("$cmd_name")
+        fi
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_sourced_files
+# Purpose: display ALL files that are sourced.
+#------------------------------------------------------------------------
+_ca_sourced_files() {
+    _ca_sourcedtree
+    printf "====== Sourced File Inspection (Mode: -s) ======\n\n"
+    printf "├─ Searching for files that have been sourced into the enviroment automatically\n" 
+    printf "    ↳ %sDiscovered the following files%s:\n" "$UNLINE" "$STOPUNLINE"
+
+
+    local phase
+    local -a roots ordered
+    local f
+
+    # Reset global state (important)
+    __CA_SOURCED_FILES_MAP=()
+    __CA_SOURCED_FILES_LIST=()
+    __CA_SOURCED_SCANNED=0
+
+    #-------------------------------------------------------
+    # Phase 1: Non-interactive
+    if [[ -n "$BASH_ENV" && -f "$BASH_ENV" ]]; then
+        roots+=( "$BASH_ENV" )
+        phase="non-interactive"
+    fi
+
+    #-------------------------------------------------------
+    # Phase 2: Login shell
+    if shopt -q login_shell; then
+        phase="login"
+
+        [[ -f /etc/profile ]] && roots+=( /etc/profile )
+        [[ -d /etc/profile.d ]] && roots+=( /etc/profile.d/*.sh )
+    
+        if [[ -f ~/.bash_profile ]]; then
+            roots+=( ~/.bash_profile )
+        elif [[ -f ~/.bash_login ]]; then
+            roots+=( ~/.bash_login )
+        elif [[ -f ~/.profile ]]; then
+            roots+=( ~/.profile )
+        fi
+
+    #-------------------------------------------------------
+    # Phase 3: Interactive non-login
+    elif [[ $- == *i* ]]; then
+        phase="interactive non-login"
+
+        [[ -f /etc/bash.bashrc ]] && roots+=( /etc/bash.bashrc )
+        [[ -f /etc/bashrc ]] && roots+=( /etc/bashrc )
+        [[ -f ~/.bashrc ]] && roots+=( ~/.bashrc )
+    fi
+
+    if [ -f /etc/os-release ]; then
+        while IFS='=' read -r key value; do
+            # Remove surrounding quotes if present
+            value="${value%\"}"
+            value="${value#\"}"
+            case "$key" in
+                ID)
+                    [[ "$value" == "fedora" || "$value" == "rhel" ]] && is_rhel_like=1
+                    ;;
+                ID_LIKE)
+                    [[ "$value" == *"rhel"* ]] && is_rhel_like=1
+                    ;;
+            esac
+        done < /etc/os-release
+    fi
+    
+    if [[ -n "$is_rhel_like" ]]; then
+        # This system is Fedora/RHEL-like
+        [[ -d /etc/profile.d ]] && roots+=( /etc/profile.d/*.sh )
+    fi 
+
+    #-------------------------------------------------------
+    # Static discovery pass
+    for f in "${roots[@]}"; do
+        _ca_sourcedtree_single "$f" 0 "$CA_MAX_DEPTH"
+    done
+
+    #-------------------------------------------------------
+    # Emit ordered walk
+    # Root files first, then discovered children
+    for f in "${roots[@]}"; do
+        f=$(_ca_expand_path "$f")
+        [[ -f "$f" ]] && ordered+=( "$f" )
+    done
+
+    for f in "${__CA_SOURCED_FILES_LIST[@]}"; do
+        [[ " ${ordered[*]} " != *" $f "* ]] && ordered+=( "$f" )
+    done
+
+    #-------------------------------------------------------
+    # Output
+    local i=0
+    for f in "${ordered[@]}"; do
+      #  printf "    ↳ ${CYAN}%s${RESET}\n" "$file" 
+        # Build clickable line
+        local clickable_text
+        clickable_text=$(printf "${CYAN}%s${RESET}" "$f")
+        # Print clickable link
+        printf "    ↳ \e]8;;file://%s\a%s\e]8;;\a\n" "$f" "$clickable_text"
+    done
+    printf "\n================ End of list =================== \n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_show_path_alternates
+# Purpose : Display path shadowing of a command
+#------------------------------------------------------------------------
+_ca_show_path_alternates() {
+    local cmd="$1" cmdpath="$2"
+    local shad=()
+    local dir
+
+    IFS=':' read -ra PATH_ARR <<< "$PATH"
+    for dir in "${PATH_ARR[@]}"; do
+        [[ -z "$dir" ]] && dir="."
+        local p="$dir/$cmd"
+
+        [[ -f "$p" && -x "$p" ]] || continue
+        [[ "$p" == "$cmdpath" ]] && continue
+
+        shad+=("$p")
+    done
+
+    (( ${#shad[@]} == 0 )) && return 0
+
+    printf "%s    ↳ Alternate PATH matches:\n" "$CA_INDENT"
+
+    local s
+    for s in "${shad[@]}"; do
+        printf "%s    │    ${CYAN}%s${RESET}\n" "$CA_INDENT" "$s"
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_lookup_package  # usage: _ca_lookup_package "$cmd_path" "$CA_INDENT"
+# Purpose : Lookup package info for a given command path
+#------------------------------------------------------------------------
+_ca_lookup_package() {
+    local cmd_path="$1"
+    local CA_INDENT="${2:-}"  # optional CA_INDENTation
+    local pkg_mgr pkg_name pkg_lines=()
+
+    pkg_mgr=$(_ca_detect_pkg_manager)
+    [[ -z "$pkg_mgr" ]] && return 1  # no package manager detected
+
+    case "$pkg_mgr" in
+        dpkg)
+            pkg_name=$(dpkg -S "$cmd_path" 2>/dev/null | cut -d: -f1 | head -n1)
+            if [[ -n "$pkg_name" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                    < <(dpkg-query -W -f='${Package}\n${Version}\n${Maintainer}\n${Description}\n' "$pkg_name" 2>/dev/null)
+            fi
+            ;;
+        rpm)
+            pkg_name=$(rpm -qf "$cmd_path" 2>/dev/null)
+            if [[ -n "$pkg_name" && "$pkg_name" != "file $cmd_path is not owned by any package" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                    < <(rpm -qi "$pkg_name" | awk '
+                    NR==1 { pkg=$3 }
+                    NR==2 { ver=$3 }
+                    /^Vendor/ {
+                    vendor = $3 " " $4      # space between $3 and $4
+                    }
+                    /^Summary/ {
+                    # print from field 3 to end
+                    desc = substr($0, index($0, $3))
+                    }
+                    END {
+                    print pkg
+                    print ver
+                    print vendor
+                    print desc
+                    }
+                ')
+            fi
+            ;;   
+        pacman)
+            pkg_name=$(pacman -Qo "$cmd_path" 2>/dev/null | awk '{print $5}')
+            if [[ -n "$pkg_name" ]]; then
+                while IFS= read -r line; do pkg_lines+=("$line"); done \
+                < <(pacman -Qi "$pkg_name" | awk -F': *' '
+                    /^Name/        { name=$2 }
+                    /^Version/     { ver=$2 }
+                    /^Packager/    { maint=$2 }
+                    /^Description/ { desc=$2 }
+                    END {
+                        print name
+                        print ver
+                        print maint
+                        print desc
+                    }
+               ')
+           fi
+           ;;
+    esac
+
+    # Print package info if available   ----works for apt and rpm
+    if [[ -n "${pkg_lines[0]}" ]]; then
+        printf "%s    ↳ Package Info:\n" "$CA_INDENT"
+        printf "%s    ⎟    Package: ${CYAN}%s${RESET}\n" "$CA_INDENT" "${pkg_lines[0]}"
+        printf "%s    ⎟    Version: ${CYAN}%s${RESET}\n" "$CA_INDENT" "${pkg_lines[1]}"
+        printf "%s    ⎟    Maintainer: ${CYAN}%s${RESET}\n" "$CA_INDENT" "${pkg_lines[2]}"
+        printf "%s    ⎟    Description: ${CYAN}%s${RESET}\n" "$CA_INDENT" "${pkg_lines[3]}"
+    fi
+}
+
+# Detect package manager once
+_ca_detect_pkg_manager() {
+    if command -v dpkg &>/dev/null; then
+        echo "dpkg"
+    elif command -v rpm &>/dev/null; then
+        echo "rpm"
+    elif command -v pacman &>/dev/null; then
+        echo "pacman"
+    else
+        echo ""
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_verify_package  # usage: _ca_verify_package "$cmd_path" "$CA_INDENT"
+# Purpose : verify package for a given command
+#------------------------------------------------------------------------
+_ca_verify_package() {
+    local cmd="$1"
+    local ctype pkg status cmd_path cmd_real verify pkg_mgr bash_hit
+    sha="Unknown"
+    status="${GREEN}CLEAN${RESET}"
+    bash_hit=0
+    
+    # guard against trash commands
+    ctype=$(type -t -- "$cmd" 2>/dev/null)
+    if [[ -z "$ctype" ]]; then
+        printf "├─ ${RED}Unknown or invalid command:${CYAN} '%s'${RESET}\n" "$cmd"
+        printf "    ↳ Check your spelling and try again\n\n" 
+        return 1
+    fi
+
+    # Compute SHA using _ca_show_hash
+    sha=$(_ca_show_hash "$cmd" 2>/dev/null)
+    
+    printf "├─ Examining Package Integrity:\n"
+    printf "    ├─ Command: ${CYAN}%s${RESET}\n" "$cmd"
+
+    case "$ctype" in
+        alias)
+            pkg="${YELLOW}Not From a Package${RESET}"
+            status="${YELLOW}Alias (not verifiable)${RESET}"
+            printf "    ├─ Package: ${CYAN}%s${RESET}\n" "${pkg}"
+            printf "    ├─ SHA256: %s\n" "$sha"    
+            printf "    └─ Status: %s\n" "$status"
+            return 0
+            ;;
+        function)
+            pkg="${YELLOW}Not From a Package${RESET}"
+            status="${YELLOW}Function (not verifiable)${RESET}"
+            printf "    ├─ Package: ${CYAN}%s${RESET}\n" "${pkg}"
+            printf "    ├─ SHA256: %s\n" "$sha"    
+            printf "    └─ Status: %s\n" "$status"
+            return 0           
+            ;;
+        builtin|keyword)
+            bash_hit=1
+            ctype="file"
+            ;;
+    esac    
+    
+    if [[ "$ctype" == "file" ]]; then      
+        cmd_path=$(command -v "$cmd") 
+        cmd_real=$(readlink -f "$cmd_path" 2>/dev/null || echo "$cmd_path")
+   
+        # Compute SHA using _ca_show_hash
+        sha=$(_ca_show_hash "$cmd_real" 2>/dev/null)
+           
+        pkg_mgr=$(_ca_detect_pkg_manager)
+        [[ -z "$pkg_mgr" ]] && return 1  # no package manager detected
+
+        if (( bash_hit == 1 )); then 
+             cmd_real=/usr/bin/bash
+             sha=$(_ca_show_hash "$cmd_real" 2>/dev/null)
+        fi
+                 
+        case "$pkg_mgr" in
+            dpkg)
+                pkg=$(dpkg -S "$cmd_real" 2>/dev/null | cut -d: -f1)
+                if [[ -n "$pkg" ]]; then
+                    verify=$(dpkg -V "$pkg" | grep -F "$cmd_real")
+                fi
+                ;;
+            rpm)
+                if pkg=$(rpm -qf "$cmd_real" 2>/dev/null); then
+                    verify=$(rpm -V "$pkg" | grep -F "$cmd_real")
+                fi
+                ;;   
+            pacman)
+                pkg=$(pacman -Qo "$cmd_real" 2>/dev/null | cut -d' ' -f5)
+                if [[ -n "$pkg" ]]; then
+                    verify=$(pacman -Qk "$pkg" 2>/dev/null | grep -F "$cmd_real")
+                fi
+                ;;
+        esac
+
+        if [[ -n "$verify" ]]; then
+            status="${RED}TAMPERED${RESET}"
+        elif (( bash_hit == 1 )); then
+            status="${GREEN}CLEAN (builtin or keyword)${RESET}"           
+        elif [[ -z "$pkg" ]]; then
+            status="${YELLOW}USER INSTALLED (not verifiable)${RESET}"   
+        fi
+
+        if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
+            printf "    ├─ Resolves to: ${CYAN}%s${RESET} → ${BPURP}[ %s ]${RESET}\n" "$cmd" "$(basename "$cmd_real")"
+        else
+            printf "    ├─ Resolves to: ${CYAN}%s${RESET}\n" "$cmd"
+        fi
+    
+        printf "    ⎟\n"
+            
+        if [[ "$(basename "$cmd_real")" != "$cmd" ]]; then
+            printf "    ├─ Package: ${BPURP}%s${RESET}\n" "${pkg:-none}"
+        elif [[ -n "$pkg" ]]; then  # pkg present
+            printf "    ├─ Package: ${CYAN}%s${RESET}\n" "$pkg"
+        else                        # pkg empty
+            printf "    ├─ Package: %sNot From a Package%s\n" "$YELLOW" "$RESET"
+        fi
+        printf "    ├─ Path: %s\n" "$cmd_real"
+        printf "    ├─ %s\n" "$sha"                
+        printf "    └─ Status: %s\n" "$status"   
+    fi
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_show_hash  # usage: _ca_show_hash "$cmd_path"
+# Purpose : calc hashes
+#------------------------------------------------------------------------
+_ca_show_hash() {
+    local cmd="$1"
+    local ctype hash=""
+    ctype=$(type -t -- "$cmd" 2>/dev/null)
+    
+    case "$ctype" in
+        alias) 
+            hash=$(alias "$cmd" 2>/dev/null | awk -F"=" '{print $2}' | sha256sum | awk '{print $1}')
+            ;;
+        function) 
+            hash=$(declare -f "$cmd" | sha256sum | awk '{print $1}') 
+            ;;
+        file) 
+            local path
+            path=$(command -v "$cmd")
+            if [[ -x "$path" ]]; then
+                hash=$(sha256sum "$path" | awk '{print $1}')
+            fi
+            ;;
+    esac
+    
+    echo "$hash"
+}
+
+#-----------------------------------------------------------
+# Function: _ca_list_user_bin
+# Purpose : Identify user writable commands/scripts/binaries
+#-----------------------------------------------------------
+_ca_list_user_bin() {
+    CA_INDENT=$(printf "%*s" $((1 * 4)) "")
+    printf "=== User writable scripts/binaries (Mode: -u) ===\n\n"
+    _ca_restore_path
+
+    local found=0  # flag to track if anything is printed
+
+    for dir in ${PATH//:/ }; do
+        [ -d "$dir" ] || continue
+        [[ "$dir" =~ ^/usr|^/bin ]] && continue
+        for f in "$dir"/*; do
+            [ -x "$f" ] || continue
+            local fn
+            fn=$(basename "$f")
+            local clickable_text
+            clickable_text=$(printf "${CYAN}(%s)${RESET}" "$f")
+            printf "%s %-25s  -- Defined in: \e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$fn" "$f" "$clickable_text"
+            found=1
+        done
+    done
+
+    if [ $found -eq 0 ]; then
+        printf "%s%s\n\n" "$CA_INDENT" "No user-writable scripts or binaries found."
+    fi
+
+    printf "\n================ End of list =================== \n"
+}
+
+# ----------------------------------------------------------------------
+# Function: _ca_function
+# Builds a clickable list of shell functions with file links
+# ----------------------------------------------------------------------
+_ca_function() {
+    CA_INDENT=$(printf "%*s" $((depth * 4)) "")
+    local verbose=${verbose:-0}
+    printf "==== List of shell functions (Mode: -f -fv) ====\n\n"
+    local fn
+    if [[ "$verbose" == 1 ]]; then
+        # Show all functions including internal
+        compgen -A function | while read -r fn; do
+            _ca_print_fn "$fn" "$CA_INDENT"
+        done
+    else
+        # Filter out internal/system functions
+        compgen -A function | grep -Ev '^(__|_|_comp|_python_)' | while read -r fn; do
+            _ca_print_fn "$fn" "$CA_INDENT"
+        done
+    fi
+            printf "\n================ End of list =================== \n"
+}
+
+# ----------------------------------------------------------------------
+# Helper: print a single function line with clickable link
+_ca_print_fn() {
+    local fn="$1"
+    CA_INDENT=$(printf "%*s" $((1 * 4)) "")
+    local was_extdebug=0 _ line file
+
+    # Enable extdebug to get file/line
+    if ! shopt -q extdebug; then
+        shopt -s extdebug
+        was_extdebug=1
+    fi
+
+    read -r _ line file <<< "$(declare -F "$fn")"
+    (( was_extdebug )) && shopt -u extdebug
+
+    # Default fallback for interactive or missing file
+    [[ -z "$file" ]] && file="?"
+
+    # Build clickable line with function name, file, line
+    local clickable_text
+    clickable_text=$(printf "${CYAN}(%s : line %s)${RESET}" \
+            "$file" "$line")
+            
+    # Print clickable link
+    printf "%s %-15s  -- Defined in: \e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$fn" "$file" "$clickable_text"
+}
+                
+# ----------------------------------------------------------------------
+# Function: _ca_aliases
+# Builds a clickable list of shell aliases with file links
+# ----------------------------------------------------------------------
+_ca_aliases() {
+       printf "======= List of shell aliases (Mode: -a) =======\n\n"
+    local CA_INDENT
+    CA_INDENT=$(printf "%*s" $((1 * 4)) "")
+
+    # Ensure sourced files list exists
+    _ca_ensure_sourcedtree
+    [[ -z "${__CA_SOURCED_FILES_LIST[*]}" ]] && return
+
+    # Temporarily enable nullglob
+    local nullglob_was=0
+    if ! shopt -q nullglob; then
+        shopt -s nullglob
+        nullglob_was=1
+    fi
+
+    # Iterate over all aliases
+    for alias_name in $(compgen -A alias); do
+        local file line_number found=0
+
+        # Search for the first file defining this alias
+        for file in "${__CA_SOURCED_FILES_LIST[@]}"; do
+            [[ -r "$file" ]] || continue
+            line_number=$(grep -nE "^[[:space:]]*alias[[:space:]]+${alias_name}[[:space:]]*=" "$file" | head -n1 | cut -d: -f1)
+            if [[ -n "$line_number" ]]; then
+                found=1
+                break
+            fi
+        done
+
+        # Skip if not found
+        [[ $found -eq 0 ]] && continue
+
+        # Build clickable line
+        local clickable_text
+        clickable_text=$(printf "${CYAN}(%s : line %s)${RESET}" \
+            "$file" "$line_number")
+
+        # Print entire line as clickable link
+        printf "%s %-10s  -- Defined in:\e]8;;file://%s\a%s\e]8;;\a\n" "$CA_INDENT" "$alias_name" "$file" "$clickable_text"
+    done
+
+    # Restore nullglob if we changed it
+    (( nullglob_was == 1 )) && shopt -u nullglob
+        printf "\n================ End of list =================== \n"
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_print_trace
+# Purpose: Command Resolution Trace (aliases, functions, builtins, PATH)
+#------------------------------------------------------------------------
+_ca_print_trace() {
+    local cmd="$1"
+    local path_winner=0
+    local bash_winner_type=""
+    local -a res
+    local winner=""
+    local found_path=""
+    local alias_def="" file line quote result
+
+    _ca_resolve_command "$cmd" res
+    
+    printf "\n    ├─ ${CYAN}%s${RESET} -- command resolution order:\n" "$cmd"
+    printf "    ⎟\n" 
+    
+    # 1. Alias
+    printf "    ├─ Alias?\n"
+    if [[ ${res[0]} == alias\|found* ]]; then
+        alias_def="${res[0]#*|found|}"
+        quote="${alias_def#*=}"   # removes everything up to '=' → "'ls -alF'"
+        quote="${quote:0:1}"      # first character → "'"
+        result="${alias_def#*"${quote}"}"  # removes everything up to first quote → "ls -alF'"
+        result="${result%"${quote}"}"      # removes trailing "'" → "ls -alF"          
+        printf "    ⎟    ↳ ${CYAN}%s - found → %s${RESET}\n" "$cmd" "$alias_def"
+        winner="alias"
+        bash_winner_type="alias"
+        found_path="$cmd"
+    else
+        printf "    ⎟    ↳ %s - not found\n" "$cmd"
+    fi
+    printf "    ⎟   \n" 
+    
+   # 2. function
+printf "    ├─ Function?\n"
+if [[ ${res[1]} == function\|found* ]]; then
+    IFS='|' read -r _ _ file line <<< "${res[1]}"
+    if [[ -z $winner ]]; then
+        winner="function"
+        bash_winner_type="function"   
+        found_path="$cmd"
+        printf "    ⎟    ↳ ${CYAN}%s - found → ${RESET} (${CYAN}%s : line %s${RESET})\n" "$cmd" "$file" "$line"  
+    else
+        printf "    ⎟    ↳ ${GREY}%s - found → (%s : line %s) [shadowed]${RESET}\n" "$cmd" "$file" "$line"
+    fi
+else
+    printf "    ⎟    ↳ %s - not found\n" "$cmd"
+fi
+printf "    ⎟   \n"
+    
+    # 3. Builtin
+    printf "    ├─ Builtin?\n"
+    if [[ ${res[2]} == builtin\|found ]]; then
+        if [[ -z $winner ]]; then
+            printf "    ⎟    ↳  ${CYAN}%s${RESET} - ${CYAN}enabled${RESET}\n" "$cmd"
+            winner="builtin"
+            bash_winner_type="builtin"
+            [[ -z $found_path ]] && found_path="$cmd"
+        else
+            # builtin shadowed by alias or function
+            printf "    ⎟    ↳ ${GREY}%s${RESET} - ${GREY}enabled [shadowed]${RESET}\n" "$cmd"
+        fi
+    else
+        printf "    ⎟    ↳ %s - not found\n" "$cmd"
+    fi
+    printf "    ⎟   \n"
+    
+    # 4. Keyword
+printf "    ├─ Keyword?\n"
+if [[ ${res[3]} == keyword\|found ]]; then
+    if [[ -z $winner ]]; then
+        printf "    ⎟    ↳ ${CYAN}%s${RESET} - ${CYAN}found${RESET}\n" "$cmd"
+        winner="keyword"
+        bash_winner_type="keyword"
+        [[ -z $found_path ]] && found_path="$cmd"
+    else
+        printf "    ⎟    ↳ ${GREY}%s${RESET} - ${GREY}found [shadowed]${RESET}\n" "$cmd"
+    fi
+else
+    printf "    ⎟    ↳ %s - not found\n" "$cmd"
+fi
+printf "    ⎟   \n"
+
+    # 5. PATH
+    printf "    ├─ \$PATH in order\n"
+    for ((i=4; i<${#res[@]}; i++)); do
+        IFS='|' read -r _ dir state target <<< "${res[i]}"
+        case "$state" in
+            notfound)
+                printf "    ⎟    ↳ %-24s %s - not found\n" "$dir" "$cmd"
+                ;;                
+            file)
+                if [[ -z $found_path ]]; then
+                    printf "    ⎟    ↳ %-24s ${CYAN}%s${RESET} - ${CYAN}found${RESET}\n" "$dir" "$cmd"
+                    found_path="$dir/$cmd"
+                    [[ -z $bash_winner_type ]] && path_winner=1
+                else
+                    printf "    ⎟    ↳ %-24s ${GREY}%s${RESET} - ${GREY}found [shadowed]${RESET}\n" "$dir" "$cmd"
+                fi
+                ;;
+            symlink)
+                if [[ -z $found_path ]]; then
+                    printf "    ⎟    ↳ %-24s ${CYAN}%s${RESET} - ${YELLOW}Symlink to [ %s ]${RESET}\n" \
+                        "$dir" "$cmd" "$target"
+                    found_path="$dir/$cmd"
+                    [[ -z $bash_winner_type ]] && path_winner=1
+                else
+                    printf "    ⎟    ↳ %-24s ${GREY}%s${RESET} - ${GREY}Symlink [shadowed]${RESET}\n" "$dir" "$cmd"
+                fi
+                ;;
+        esac
+    done
+    printf "    ⎟ \n"
+    
+    
+    # Determine if any PATH entry exists for this cmd
+local shadowed_file=0
+for ((i=4; i<${#res[@]}; i++)); do
+    IFS='|' read -r _ dir state target <<< "${res[i]}"
+    if [[ "$state" == "file" || "$state" == "symlink" ]]; then
+        shadowed_file=1
+        break
+    fi
+done
+    
+# Bash resolution target
+printf "    ├─ Bash resolution target:\n"
+if [[ -n $found_path ]]; then
+    local canonical
+    canonical=$(readlink -f -- "$found_path" 2>/dev/null || echo "$found_path")
+    case "$bash_winner_type" in
+        alias)
+            printf "    ⎟    ↳ Executed: ${CYAN}Alias: %s${RESET} (${CYAN}%s${RESET})\n" "$found_path" "$alias_def"
+            ;;
+        function)
+            printf "    ⎟    ↳ Executed: ${CYAN}Function: %s${RESET} (${CYAN}%s : line %s${RESET})\n" "$found_path" "$file" "$line"
+            ;;
+        builtin)
+            printf "    ⎟    ↳ Executed: ${CYAN}%s${RESET} (${CYAN}builtin${RESET})\n" "$found_path"
+            ;;
+        keyword)        
+            # Always print keyword line
+            printf "    ⎟    ↳ Keyword: ${CYAN}%s${RESET}\n" "$cmd"
+
+            # Print shadow notice if a filesystem executable exists
+            if (( shadowed_file )); then
+                printf "    ⎟    ↳ Note: filesystem executables named ${CYAN}%s${RESET} are unreachable by bare invocation\n" "$cmd"
+            fi
+            ;;
+        *)
+            if [[ "$found_path" != "$canonical" ]]; then
+                printf "    ⎟    ↳ Executed: ${CYAN}%s${RESET}  -  ${YELLOW}Symlink to [ %s ]${RESET}\n" "$found_path" "$canonical"
+            else
+                printf "    ⎟    ↳ Executed: ${CYAN}%s${RESET}\n" "$found_path"
+            fi
+            ;;
+    esac
+else
+    printf "    ⎟    ↳ Executed: not found\n"
+fi
+printf "    ⎟ \n"
+
+
+# Kernel execution
+if (( path_winner )); then
+
+    printf "    ├─ Kernel execution target:\n"
+
+    local canonical
+    canonical=$(readlink -f -- "$found_path" 2>/dev/null || echo "$found_path")
+    if [[ "$found_path" != "$canonical" ]]; then
+        printf "    ⎟    ↳ ${YELLOW}Symlink${RESET} → ${BPURP}%s${RESET}\n" "$canonical"
+    else
+        printf "    ⎟    ↳ Executable → %s\n" "$canonical"
+    fi
+
+    # ELF interpreter
+    if file "$canonical" 2>/dev/null | grep -q ELF; then
+        local interp
+        interp=$(readelf -l "$canonical" 2>/dev/null | awk '/interpreter/ {print $NF}')
+        [[ -n $interp ]] && printf "    ⎟    ↳ ELF interpreter: ${CYAN}%s${RESET}\n" "$interp"
+    fi
+
+    # Script shebang
+    if head -1 "$canonical" 2>/dev/null | grep -q '^#!'; then
+        printf "    ⎟    ↳ Shebang: ${CYAN}%s${RESET}\n" "$(head -1 "$canonical" | cut -c3-)"
+    fi
+fi
+printf "    ⎟ \n"
+ #  printf "    └──────────────────────────────────────────\n" 
+    printf "    ├──────────────────────────────────────────\n" 
+printf "    ⎟ \n"
+printf "    ├─  Analyzing %s\n" "$cmd"
+
+depth=${2:-1}              # default to 1 if $2 is missing
+if ! [[ "$depth" =~ ^[0-9]+$ ]]; then
+    depth=1
+fi
+
+ca "$cmd" $((depth + 1))
+
+}
+
+#---------------------
+# Helper function: _ca_resolve_command
+_ca_resolve_command() {
+    local cmd="$1"
+    local -n out_refca="$2"
+    out_refca=()
+
+    local type_kind
+    type_kind=$(type -t "$cmd" 2>/dev/null)
+
+    # Alias
+    if [[ "$type_kind" == "alias" ]]; then
+        out_refca+=("alias|found|$(alias "$cmd")")
+    else
+        out_refca+=("alias|notfound")
+    fi
+
+    # Function
+if declare -F "$cmd" &>/dev/null; then
+    local line file was_extdebug=0
+    shopt -q extdebug || { shopt -s extdebug; was_extdebug=1; }
+    read -r _ line file <<< "$(declare -F "$cmd")"
+    (( was_extdebug )) && shopt -u extdebug
+    [[ -z $file ]] && file="interactive shell"
+    out_refca+=("function|found|$file|$line")
+else
+    out_refca+=("function|notfound")
+fi
+
+    # Builtin
+if compgen -b | grep -qx "$cmd"; then
+    out_refca+=("builtin|found")
+else
+    out_refca+=("builtin|notfound")
+fi
+
+# Keyword
+if compgen -k | grep -qx "$cmd"; then
+    out_refca+=("keyword|found")
+else
+    out_refca+=("keyword|notfound")
+fi
+
+    # PATH
+    IFS=: read -ra dirs <<< "$PATH"
+    for d in "${dirs[@]}"; do
+        local p="$d/$cmd"
+        if [[ -x "$p" ]]; then
+            if [[ -L "$p" ]]; then
+                out_refca+=("path|$d|symlink|$(readlink -f "$p")")
+            else
+                out_refca+=("path|$d|file")
+            fi
+        else
+            out_refca+=("path|$d|notfound")
+        fi
+    done
+}
+
+#------------------------------------------------------------------------
+# Function: _ca_bash_option_diff
+# Purpose: shell option diff from default state
+#------------------------------------------------------------------------
+_ca_bash_option_diff() {
+    local tmp_default tmp_current
+    local CA_INDENT
+    CA_INDENT=$(printf "%*s" $((1 * 4)) "")
+
+    printf "===Changed shell options (default vs current)===\n\n"
+
+    tmp_default=$(mktemp)
+    tmp_current=$(mktemp)
+
+    # Normalize output from set -o and shopt -p
+    _ca_normalize() {
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^([a-z_-]+)[[:space:]]+(on|off)$ ]]; then
+                # set -o output
+                echo "set:${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+            elif [[ "$line" =~ ^shopt[[:space:]]+(-s|-u)[[:space:]]+([a-z_-]+)$ ]]; then
+                local state
+                [[ "${BASH_REMATCH[1]}" == "-s" ]] && state="on" || state="off"
+                echo "shopt:${BASH_REMATCH[2]}=$state"
+            fi
+        done
+    }
+
+    # Capture default shell options
+    bash --noprofile --norc -c 'set -o; shopt -p' | _ca_normalize | sort > "$tmp_default"
+    # Capture current shell options
+    { set -o; shopt -p; } | _ca_normalize | sort > "$tmp_current"
+
+    local changed=0
+
+    # Read defaults and compare with current
+    while IFS='=' read -r key default_val; do
+        local current_val
+        current_val=$(grep -F "$key=" "$tmp_current" | cut -d= -f2)
+        # If current_val is empty, assume missing (shouldn't happen)
+        current_val=${current_val:-missing}
+
+        if [[ "$default_val" != "$current_val" ]]; then
+            changed=1
+            local state color
+            if [[ "$current_val" == "on" ]]; then
+                state="ENABLED"
+                color="$GREEN"
+            else
+                state="DISABLED"
+                color="$RED"
+            fi
+            printf "%s%s%-8s%s %s (%s → %s)\n" \
+                "$CA_INDENT" "$color" "$state" "$RESET" "$key" "$default_val" "$current_val"
+        fi
+    done < "$tmp_default"
+
+    # Empty case
+    if [ $changed -eq 0 ]; then
+        printf "%sNo shell options differ from default.\n" "$CA_INDENT"
+    fi
+
+    printf "\n================ End of list =================== \n"
+
+    rm -f "$tmp_default" "$tmp_current"
+}
+
+#-----------------------------------------------------------
+# Function: _ca_apply_startup_with_env_tracking
+# Purpose : Source startup files in order and attribute
+#           environment variable changes to each file
+#-----------------------------------------------------------
+_ca_apply_startup_with_env_tracking() {
+    local file line var val
+
+    # Provenance maps
+    declare -gA __CA_VAR_SOURCE
+    declare -gA __CA_VAR_PREV
+
+    while IFS= read -r file; do
+        [[ -z "$file" || ! -r "$file" ]] && continue
+
+        while IFS= read -r line; do
+            # Skip comments and empty lines
+            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+            # Match simple variable assignments (VAR=VALUE, export VAR=VALUE, declare VAR=VALUE)
+            if [[ "$line" =~ ^[[:space:]]*(export|declare|typeset)?[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$ ]]; then
+                var="${BASH_REMATCH[2]}"
+                val="${BASH_REMATCH[3]}"
+                val="${val%\"}"
+                val="${val#\"}"
+                val="${val%\'}"
+                val="${val#\'}"
+
+                # Track previous source
+                [[ -n "${__CA_VAR_SOURCE[$var]:-}" ]] && \
+                    __CA_VAR_PREV["$var"]+="${__CA_VAR_SOURCE[$var]} → "
+
+                __CA_VAR_SOURCE["$var"]="$file"
+                continue
+            fi
+
+            # Optionally, capture array declarations without execution
+            if [[ "$line" =~ ^[[:space:]]*(declare|typeset)[[:space:]]+-a[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+                var="${BASH_REMATCH[2]}"
+                [[ -n "${__CA_VAR_SOURCE[$var]:-}" ]] && \
+                    __CA_VAR_PREV["$var"]+="${__CA_VAR_SOURCE[$var]} → "
+                __CA_VAR_SOURCE["$var"]="$file"
+                continue
+            fi
+
+            if [[ "$line" =~ ^[[:space:]]*(declare|typeset)[[:space:]]+-A[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*) ]]; then
+                var="${BASH_REMATCH[2]}"
+                [[ -n "${__CA_VAR_SOURCE[$var]:-}" ]] && \
+                    __CA_VAR_PREV["$var"]+="${__CA_VAR_SOURCE[$var]} → "
+                __CA_VAR_SOURCE["$var"]="$file"
+                continue
+            fi
+
+        done < "$file"
+
+    done < <(_ca_walk_bash_startup | awk '/^[0-9]/ {print $2}')
+    
+    _ca_print_tracked_vars | awk 'NF || prev {print} {prev=NF}'
+}
+
+# Usage: _ca_hyperlink "/path/to/file"
+_ca_hyperlink() {
+    local file="$1"
+    # OSC 8 sequence: \e]8;;URL\aTEXT\e]8;;\a
+    printf "${CYAN}\e]8;;file://%s\a%s\e]8;;\a${RESET}" "$file" "$file"
+}
+
+_ca_print_tracked_vars() {
+    local var file
+        printf "\n============= Sourced Variables ================ \n"    
+    for var in "${!__CA_VAR_SOURCE[@]}"; do
+        file="${__CA_VAR_SOURCE[$var]}"
+        printf "    %-30s  defined in: " "$var"
+        _ca_hyperlink "$file"
+
+  #      [[ -n "${__CA_VAR_PREV[$var]:-}" ]] && printf "   overridden from: ${CYAN}%s${RESET}\n" "${__CA_VAR_PREV[$var]}"
+        
+       printf "\n"
+    done | sort
+        printf "\n================ End of list =================== \n"
+}
+
+#-----------------------------------------------------------
+# Function: _ca_list_env
+# Usage:
+#   _ca_list_env           # List all exported environment variables, sorted
+#   _ca_list_env PATTERN   # List variables matching PATTERN, sorted
+#-----------------------------------------------------------
+_ca_list_env() {
+    local pattern="$1"
+    local cmd
+    local width name value wrap line
+
+    _ca_restore_path
+    command -v printenv &>/dev/null && cmd="printenv" || cmd="env"
+
+    # Determine terminal width with fallback
+    width=${COLUMNS:-$(tput cols 2>/dev/null)}
+    width=$((width - 4))
+    [[ $width -le 0 ]] && width=76
+
+    printf "\n    ============= Sourced Variables ================\n\n"
+
+    # Build command with optional pattern filter
+    if [[ -n "$pattern" ]]; then
+        cmd="$cmd | grep --color=auto -E \"$pattern\""
+    else
+        cmd="$cmd | sort"
+    fi
+
+    # Read variables
+    eval "$cmd" | while IFS='=' read -r name value; do
+        # Determine if variable should wrap by colon
+        case "$name" in
+            PATH|LD_LIBRARY_PATH|XDG_DATA_DIRS|LS_COLORS)
+                wrap=true ;;
+            *)
+                wrap=false ;;
+        esac
+
+        # Print variable name
+        printf "    ${CYAN}%s${RESET}=" "$name"
+
+        if $wrap; then
+            # Split colon-separated values safely
+            IFS=':' read -ra parts <<< "$value"
+            line=""
+            for part in "${parts[@]}"; do
+                # Start a new line if it would overflow width
+                if [ $(( ${#line} + ${#part} + 1 )) -gt $width ]; then
+                    # Print existing line
+                    printf "%s\n        " "$line"
+                    line="$part"
+                else
+                    [[ -z $line ]] && line="$part" || line="$line:$part"
+                fi
+            done
+            # Print remaining line
+            printf "%s\n" "$line"
+        else
+            # Fold normal variable values with indentation
+            echo "$value" | fold -s -w "$width" | sed '2,$s/^/        /'
+        fi
+    done
+
+    printf "\n    ================ End of list =================== \n"
+}
+
+#-----------------------------------------------------------
+# Function: _ca_walk_bash_startup
+# Purpose : Walk Bash startup files in correct semantic order
+#-----------------------------------------------------------
+_ca_walk_bash_startup() {
+    local phase
+    local -a roots ordered
+    local f
+
+    # Reset global state (important)
+    __CA_SOURCED_FILES_MAP=()
+    __CA_SOURCED_FILES_LIST=()
+    __CA_SOURCED_SCANNED=0
+
+    #-------------------------------------------------------
+    # Phase 1: Non-interactive
+    if [[ -n "$BASH_ENV" && -f "$BASH_ENV" ]]; then
+        roots+=( "$BASH_ENV" )
+        phase="non-interactive"
+    fi
+
+    #-------------------------------------------------------
+    # Phase 2: Login shell
+    if shopt -q login_shell; then
+        phase="login"
+
+        [[ -f /etc/profile ]] && roots+=( /etc/profile )
+        [[ -d /etc/profile.d ]] && roots+=( /etc/profile.d/*.sh )
+
+        if [[ -f ~/.bash_profile ]]; then
+            roots+=( ~/.bash_profile )
+        elif [[ -f ~/.bash_login ]]; then
+            roots+=( ~/.bash_login )
+        elif [[ -f ~/.profile ]]; then
+            roots+=( ~/.profile )
+        fi
+
+    #-------------------------------------------------------
+    # Phase 3: Interactive non-login
+    elif [[ $- == *i* ]]; then
+        phase="interactive"
+
+        [[ -f /etc/bash.bashrc ]] && roots+=( /etc/bash.bashrc )
+        [[ -f /etc/bashrc ]] && roots+=( /etc/bashrc )
+        [[ -f ~/.bashrc ]] && roots+=( ~/.bashrc )
+    fi
+
+    #-------------------------------------------------------
+    # Static discovery pass
+    for f in "${roots[@]}"; do
+        _ca_sourcedtree_single "$f" 0 "$CA_MAX_DEPTH"
+    done
+
+    #-------------------------------------------------------
+    # Emit ordered walk
+    # Root files first, then discovered children
+    for f in "${roots[@]}"; do
+        f=$(_ca_expand_path "$f")
+        [[ -f "$f" ]] && ordered+=( "$f" )
+    done
+
+    for f in "${__CA_SOURCED_FILES_LIST[@]}"; do
+        [[ " ${ordered[*]} " != *" $f "* ]] && ordered+=( "$f" )
+    done
+
+    #-------------------------------------------------------
+    # Output
+    printf '\n=============Bash startup walk (%s)=============\n' "$phase"
+    local i=0
+    for f in "${ordered[@]}"; do
+        printf '%02d  %s\n' "$((++i))" "$f"
+    done
+    printf "\n================ End of list =================== \n"
+}
+
+#------------------------------------------------------------------------
+# End of script
